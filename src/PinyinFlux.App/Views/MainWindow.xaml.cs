@@ -17,6 +17,8 @@ public sealed partial class MainWindow : Window
         ["About"] = typeof(AboutPage),
     };
 
+    public ViewModels.UpdateViewModel Updates => App.Instance.Updates;
+
     public MainWindow()
     {
         InitializeComponent();

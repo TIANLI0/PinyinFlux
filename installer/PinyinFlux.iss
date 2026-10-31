@@ -13,6 +13,10 @@
 ;     is uninstalled silently with /UPGRADE=1, and the core is started again afterwards if it was enabled.
 ;   * The upgrade uninstall keeps the certificate, proxy backup and settings, so nothing is re-trusted.
 ;
+; In-app update: PinyinFlux starts the downloaded installer with
+;   /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH=1
+; and exits. /RELAUNCH=1 starts PinyinFlux again (with --updated) once the silent install has finished.
+;
 ; Uninstall: PinyinFluxCore.exe --uninstall restores the original proxy settings, deletes the
 ; certificate and its private key, and removes autostart. Settings and logs in
 ; %LOCALAPPDATA%\PinyinFlux are deleted only if the user agrees.
@@ -105,7 +109,9 @@ Filename: "{app}\{#CoreExe}"; Parameters: "--install"; Description: "{cm:EnableN
 ; Upgrade: the core was stopped before copying files. --install starts it again and points autostart at
 ; this copy. Native injection may still need a later explicit UAC restart.
 Filename: "{app}\{#CoreExe}"; Parameters: "--install"; Flags: runhidden waituntilterminated; Check: WasEnabled
-Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent; Check: not IsRelaunchRequested
+; In-app update (/RELAUNCH=1): PinyinFlux exited for the update and expects to be started again.
+Filename: "{app}\{#AppExe}"; Parameters: "--updated"; Flags: nowait runasoriginaluser; Check: IsRelaunchRequested
 
 [Code]
 const
@@ -114,6 +120,12 @@ const
 
 var
   Enabled: Boolean;
+
+// /RELAUNCH=1: started by PinyinFlux's in-app update, which exited and expects to be started again.
+function IsRelaunchRequested(): Boolean;
+begin
+  Result := ExpandConstant('{param:RELAUNCH|0}') = '1';
+end;
 
 function IsUpgradeUninstall(): Boolean;
 begin

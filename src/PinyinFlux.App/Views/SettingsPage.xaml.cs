@@ -11,4 +11,6 @@ public sealed partial class SettingsPage : Page
     public SettingsViewModel ViewModel => App.Instance.Settings;
 
     public CoreViewModel Status => App.Instance.Status;
+
+    public UpdateViewModel Updates => App.Instance.Updates;
 }

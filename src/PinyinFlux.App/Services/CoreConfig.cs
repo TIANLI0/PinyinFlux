@@ -19,6 +19,10 @@ public sealed partial class CoreConfig
     public bool ReclaimProxy { get; set; } = true;
     public string SogouIp { get; set; } = "";
 
+    // [App]: settings of this app only; the core ignores the section.
+    public bool AutoUpdate { get; set; } = true;
+    public bool IncludePrerelease { get; set; }
+
     public static string DataDir { get; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PinyinFlux");
 
@@ -41,6 +45,8 @@ public sealed partial class CoreConfig
                 .Select(p => p.ToLowerInvariant()).ToList();
         }
         c.SogouIp = ReadString("Sogou", "Ip", "").Trim();
+        c.AutoUpdate = ReadInt("App", "AutoUpdate", 1) != 0;
+        c.IncludePrerelease = ReadInt("App", "IncludePrerelease", 0) != 0;
         return c;
     }
 
@@ -56,6 +62,8 @@ public sealed partial class CoreConfig
         Write("Core", "ReclaimProxy", ReclaimProxy ? "1" : "0");
         Write("Core", "Providers", string.Join(',', Providers));
         Write("Sogou", "Ip", SogouIp);
+        Write("App", "AutoUpdate", AutoUpdate ? "1" : "0");
+        Write("App", "IncludePrerelease", IncludePrerelease ? "1" : "0");
     }
 
     private static int ReadInt(string section, string key, int fallback) =>

@@ -81,6 +81,18 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Update(() => _config.SogouIp = value.Trim());
     }
 
+    public bool AutoUpdate
+    {
+        get => _config.AutoUpdate;
+        set => Update(() => _config.AutoUpdate = value);
+    }
+
+    public bool IncludePrerelease
+    {
+        get => _config.IncludePrerelease;
+        set => Update(() => _config.IncludePrerelease = value);
+    }
+
     public bool StartWithWindows
     {
         get => CoreClient.StartsWithWindows;
