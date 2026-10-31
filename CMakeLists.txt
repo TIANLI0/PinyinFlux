@@ -15,6 +15,7 @@ string(REPLACE "/O2" "/O1" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
 
 add_executable(PinyinFluxCore WIN32
   src/PinyinFlux.Core/main.cpp
+  src/PinyinFlux.Core/elevated_task.cpp
   src/PinyinFlux.Core/common.cpp
   src/PinyinFlux.Core/log.cpp
   src/PinyinFlux.Core/config.cpp
@@ -42,7 +43,7 @@ target_compile_definitions(PinyinFluxCore PRIVATE UNICODE _UNICODE WIN32_LEAN_AN
 target_compile_options(PinyinFluxCore PRIVATE /W4 /utf-8 /permissive- /EHsc $<$<CONFIG:Release>:/GL /Gy>)
 target_link_options(PinyinFluxCore PRIVATE $<$<CONFIG:Release>:/LTCG /OPT:REF /OPT:ICF>)
 # wininet is loaded on demand (see sysproxy.cpp); don't link it.
-target_link_libraries(PinyinFluxCore PRIVATE ws2_32 winhttp crypt32 ncrypt secur32 iphlpapi dbghelp)
+target_link_libraries(PinyinFluxCore PRIVATE ws2_32 winhttp crypt32 ncrypt secur32 iphlpapi dbghelp ole32 oleaut32 shell32 taskschd)
 
 include(FetchContent)
 FetchContent_Declare(minhook

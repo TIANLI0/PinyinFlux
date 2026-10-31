@@ -8,17 +8,20 @@
 //   PinyinFluxCore.exe --install  enable autostart and start (proxy mode: create + trust the certificate)
 //   PinyinFluxCore.exe --uninstall stop, restore proxy settings, remove certificate + autostart
 //   PinyinFluxCore.exe --stop     ask the running instance to exit
+//   PinyinFluxCore.exe --remove-task  delete the elevated start task (run elevated by --uninstall)
 //   PinyinFluxCore.exe --test <pinyin>  query the providers once
 //   PinyinFluxCore.exe --dev      local test server; never touches system settings
 
 #include "common.h"
 
 #include <psapi.h>
+#include <shellapi.h>
 #include <tlhelp32.h>
 
 #include "bing_format.h"
 #include "cert.h"
 #include "config.h"
+#include "elevated_task.h"
 #include "engine.h"
 #include "log.h"
 #include "native_injector.h"
@@ -91,6 +94,20 @@ void SetAutostart(bool enable) {
     RegDeleteValueW(key, kAppName);
   }
   RegCloseKey(key);
+}
+
+// Runs this executable with `args` after a UAC prompt and waits for it.
+void RunElevated(const wchar_t* args) {
+  std::wstring exe = ExePath();
+  SHELLEXECUTEINFOW info{sizeof(info)};
+  info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+  info.lpVerb = L"runas";
+  info.lpFile = exe.c_str();
+  info.lpParameters = args;
+  info.nShow = SW_HIDE;
+  if (!ShellExecuteExW(&info) || !info.hProcess) return;
+  WaitForSingleObject(info.hProcess, 30000);
+  CloseHandle(info.hProcess);
 }
 
 bool SignalRunningInstance(const wchar_t* eventName) {
@@ -166,10 +183,24 @@ int Run(bool console, bool dev, int devPort = 18766) {
     return kOk;
   }
 
+  auto config = LoadConfig();
+  if (!dev && config->nativeInjection) {
+    if (IsElevated()) {
+      RegisterElevatedTask(ExePath());
+    } else if (!console) {
+      // Autostart and the settings app start us unelevated: hand over to the
+      // task the user approved once, which runs the core elevated.
+      ReleaseMutex(mutex);
+      CloseHandle(mutex);
+      if (StartElevatedTask(ExePath())) return kOk;
+      mutex = CreateMutexW(nullptr, TRUE, mutexName.c_str());
+      if (GetLastError() == ERROR_ALREADY_EXISTS) return kOk;
+    }
+  }
+
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 2), &wsa);
 
-  auto config = LoadConfig();
   if (dev) {
     auto devConfig = std::make_shared<Config>(*config);
     devConfig->imeOnly = false;
@@ -331,6 +362,7 @@ int Uninstall() {
   RestoreSystemProxy();  // in case the instance was killed rather than stopped
   SetAutostart(false);
   RemoveCertificate();
+  if (!RemoveElevatedTask()) RunElevated(L"--remove-task");
   Print("PinyinFlux removed. Proxy settings restored.\n");
   return kOk;
 }
@@ -375,6 +407,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     RestoreSystemProxy();
     return kOk;
   }
+  if (cmd == L"--remove-task") return RemoveElevatedTask() ? kOk : kUsage;
   if (cmd == L"--test" && argc > 2) return RunTest(WideToUtf8(argv[2]));
 
   Print("usage: PinyinFluxCore.exe [--console | --install | --uninstall | --stop | --test <pinyin>]\n");

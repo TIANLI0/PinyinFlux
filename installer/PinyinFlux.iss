@@ -22,10 +22,10 @@
 ; %LOCALAPPDATA%\PinyinFlux are deleted only if the user agrees.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 #ifndef AppVersionNumeric
-  #define AppVersionNumeric "0.1.0.0"
+  #define AppVersionNumeric "0.1.1.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\artifacts\PinyinFlux-win-x64"
@@ -107,7 +107,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app
 ; First install: offer to enable right away, set per-user autostart and start the configured mode.
 Filename: "{app}\{#CoreExe}"; Parameters: "--install"; Description: "{cm:EnableNow}"; Flags: postinstall runhidden waituntilterminated skipifsilent; Check: not WasEnabled
 ; Upgrade: the core was stopped before copying files. --install starts it again and points autostart at
-; this copy. Native injection may still need a later explicit UAC restart.
+; this copy. Once the user has approved UAC, the core hands over to its elevated scheduled task.
 Filename: "{app}\{#CoreExe}"; Parameters: "--install"; Flags: runhidden waituntilterminated; Check: WasEnabled
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent; Check: not IsRelaunchRequested
 ; In-app update (/RELAUNCH=1): PinyinFlux exited for the update and expects to be started again.

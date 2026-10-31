@@ -13,7 +13,7 @@
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="12">
                     <TextBlock Text="常规" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <controls:SettingRow Header="开机自动启动" Description="只启动后台核心。若注入需要管理员权限，登录后仍需在概览中点击“提权重启”；此开关不会绕过 UAC。">
+                    <controls:SettingRow Header="开机自动启动" Description="只启动后台核心。若注入需要管理员权限，在概览中点击一次“提权重启”并确认 UAC 后，PinyinFlux 会登记一个仅供自身使用的计划任务，之后开机自启会直接以管理员权限运行；卸载时删除该任务。">
                         <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.StartWithWindows, Mode=TwoWay}" />
                     </controls:SettingRow>
                 </StackPanel>
