@@ -84,4 +84,10 @@ cmake --build out/core/Release --target PinyinFluxImeTest
 
 ## 发布
 
-更新 `Directory.Build.props` 中的 `VersionPrefix`，推送 `v<版本>` 标签。`release` 工作流会构建安装包并附带 SHA-256 发布到 GitHub Releases。
+版本由 `CHANGELOG.md` 驱动，与 EncoDeck 相同：
+
+1. 修改 `Directory.Build.props` 中的 `VersionPrefix`。
+2. 在 `CHANGELOG.md` 最上方加入 `## [0.2.0] - 2026-11-02 · 可选标题` 及更新内容（预发布写作 `0.2.0-beta.1`）。
+3. 推送到 main。CI 的 `version` 任务发现该版本还没有 Release，就会构建测试、打包，并以该段内容为说明发布 `v0.2.0`。版本号与 `VersionPrefix` 不一致时构建失败。
+
+最上方为 `## [Unreleased]` 时只构建不发布；每次构建都会上传 `<版本>-ci.<序号>` 的安装包和压缩包作为 Actions 产物。手动推送 `v*` 标签同样会发布。

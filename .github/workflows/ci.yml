@@ -3,23 +3,58 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
-  build:
+  # Decides whether this run publishes a release. A push to main releases the newest CHANGELOG.md version
+  # ("## [0.2.0] - 2026-11-02 · optional title") once no release exists for it yet; pushing its tag by
+  # hand still works. "## [Unreleased]" on top releases nothing.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      release: ${{ steps.pick.outputs.release }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: pick
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $changelog = Get-Content CHANGELOG.md -Raw
+          $top = [regex]::Match($changelog, '(?m)^## \[([^\]]+)\]').Groups[1].Value
+          $version = ''
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -like 'v*') { $version = $env:GITHUB_REF_NAME.Substring(1) }
+          elseif ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/main' -and $top -and $top -ne 'Unreleased') { $version = $top }
+          $release = $false
+          if ($version) {
+            $prefix = [regex]::Match((Get-Content Directory.Build.props -Raw), '<VersionPrefix>([^<]+)</VersionPrefix>').Groups[1].Value
+            if (($version -split '[-+]')[0] -ne $prefix) { throw "CHANGELOG/tag version $version does not match VersionPrefix $prefix in Directory.Build.props." }
+            gh release view "v$version" --json tagName 2>$null | Out-Null
+            $release = $LASTEXITCODE -ne 0
+            if (-not $release) { Write-Host "Release v$version already exists; nothing to publish." }
+          }
+          $global:LASTEXITCODE = 0
+          Write-Host "version=$version release=$release"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "release=$($release.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+  build-test:
     runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 10.0.x
 
@@ -32,6 +67,89 @@ jobs:
         shell: pwsh
         run: ctest --test-dir out/core/Release --output-on-failure
 
+      # Records which Microsoft Pinyin build the runner has and what was resolved for it.
+      - name: Native layout on this runner
+        shell: pwsh
+        run: ./out/core/Release/PinyinFluxLayoutTest.exe; $global:LASTEXITCODE = 0
+
       - name: Build settings app
         shell: pwsh
         run: dotnet build src/PinyinFlux.App -c Release -r win-x64 -p:Platform=x64 --nologo
+
+  package:
+    needs: [version, build-test]
+    runs-on: windows-2025
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.release == 'true' && needs.version.outputs.version || '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      # A pre-release (0.2.0-beta.1) keeps its suffix; any other build is <prefix>-ci.<run>.
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $prefix = [regex]::Match((Get-Content Directory.Build.props -Raw), '<VersionPrefix>([^<]+)</VersionPrefix>').Groups[1].Value
+          $version = if ($env:RELEASE_VERSION) { $env:RELEASE_VERSION } else { "$prefix-ci.$env:GITHUB_RUN_NUMBER" }
+          ./build/build-installer.ps1 -Version $version
+          Copy-Item README.md, CHANGELOG.md artifacts/PinyinFlux-win-x64/
+          Compress-Archive artifacts/PinyinFlux-win-x64/* artifacts/PinyinFlux-win-x64.zip
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: PinyinFlux-win-x64
+          path: |
+            artifacts/PinyinFlux-win-x64.zip
+            artifacts/installer/*.exe
+            artifacts/installer/*.sha256
+
+  release:
+    if: needs.version.outputs.release == 'true'
+    needs: [version, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Two pushes in a row must not both publish the same version.
+    concurrency:
+      group: release-${{ needs.version.outputs.version }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        shell: pwsh
+        run: |
+          $pattern = '(?ms)^## \[' + [regex]::Escape($env:VERSION) + '\]([^\r\n]*)\r?\n(.*?)(?=^## |\z)'
+          $section = [regex]::Match((Get-Content CHANGELOG.md -Raw), $pattern)
+          $notes = $section.Groups[2].Value.Trim()
+          if (-not $notes) { throw "Release notes missing for $env:VERSION." }
+          Set-Content release-notes.md $notes -Encoding utf8
+          # "## [0.2.0] - 2026-11-02 · Title" names the release "PinyinFlux 0.2.0 · Title".
+          $title = [regex]::Match($section.Groups[1].Value, '·\s*(.+?)\s*$').Groups[1].Value
+          "name=PinyinFlux $env:VERSION$(if ($title) { " · $title" })" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: PinyinFlux-win-x64
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.notes.outputs.name }}
+          draft: false
+          prerelease: ${{ contains(env.VERSION, '-') }}
+          make_latest: ${{ !contains(env.VERSION, '-') }}
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            dist/PinyinFlux-win-x64.zip
+            dist/installer/*.exe
+            dist/installer/*.sha256
