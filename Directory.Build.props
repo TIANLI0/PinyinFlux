@@ -1,0 +1,28 @@
+<Project>
+  <!--
+    PinyinFlux - domestic cloud lexicons for Microsoft Pinyin.
+    Copyright (c) 2026 Tianli
+    SPDX-License-Identifier: MIT
+  -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
+
+    <Product>PinyinFlux</Product>
+    <Company>Tianli</Company>
+    <Authors>Tianli</Authors>
+    <Copyright>Copyright (c) 2026 Tianli</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/TIANLI0/PinyinFlux</RepositoryUrl>
+
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix></VersionSuffix>
+
+    <!-- Single source of truth for the Windows TFM used by every Windows-specific project. -->
+    <PinyinFluxWindowsTfm>net10.0-windows10.0.26100.0</PinyinFluxWindowsTfm>
+    <PinyinFluxMinWindows>10.0.19041.0</PinyinFluxMinWindows>
+  </PropertyGroup>
+</Project>

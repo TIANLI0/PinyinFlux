@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- PinyinFlux: a cloud (the cloud lexicon) carrying "ā" (pinyin with a tone mark).
+       The glyph is drawn as geometry, not text, so it renders the same everywhere. -->
+  <defs>
+    <linearGradient id="cloud" x1="40" y1="44" x2="216" y2="212" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3FB0FF" />
+      <stop offset="0.55" stop-color="#3D7BFF" />
+      <stop offset="1" stop-color="#6A4BFF" />
+    </linearGradient>
+    <linearGradient id="sheen" x1="128" y1="40" x2="128" y2="140" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- soft contact shadow -->
+  <ellipse cx="128" cy="214" rx="88" ry="10" fill="#1B1F5E" opacity="0.18" />
+
+  <!-- cloud body: overlapping shapes sharing one user-space gradient, so they read as one -->
+  <g fill="url(#cloud)">
+    <circle cx="140" cy="102" r="62" />
+    <circle cx="78" cy="132" r="46" />
+    <circle cx="190" cy="138" r="42" />
+    <rect x="32" y="128" width="200" height="76" rx="38" />
+  </g>
+  <g fill="url(#sheen)">
+    <circle cx="140" cy="102" r="62" />
+    <circle cx="78" cy="132" r="46" />
+  </g>
+
+  <!-- ā -->
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round">
+    <line x1="100" y1="92" x2="158" y2="92" stroke-width="15" />
+    <circle cx="124" cy="150" r="28" stroke-width="17" />
+    <line x1="154" y1="124" x2="154" y2="176" stroke-width="17" />
+  </g>
+</svg>

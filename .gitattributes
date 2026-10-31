@@ -1,0 +1,7 @@
+# Normalize line endings in the repository; checkouts follow core.autocrlf.
+* text=auto
+
+*.png binary
+*.ico binary
+*.exe binary
+*.dll binary

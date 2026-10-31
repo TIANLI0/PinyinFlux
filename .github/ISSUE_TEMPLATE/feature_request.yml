@@ -1,0 +1,19 @@
+name: 功能建议
+description: 新词库、候选规则或界面改进
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决的问题
+      description: 现在哪里不好用？可以举出具体的拼音和期望的候选。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的做法
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 考虑过的其他方案

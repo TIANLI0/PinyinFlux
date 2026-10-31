@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PinyinFlux.App.Views.AboutPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PinyinFlux.App.Controls">
+    <Page.Resources>
+        <!-- Links sit in text flow: no button padding, so they line up with the labels above them. -->
+        <Style TargetType="HyperlinkButton" BasedOn="{StaticResource DefaultHyperlinkButtonStyle}">
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style x:Key="LinkRowStyle" TargetType="controls:WrapPanel">
+            <Setter Property="HorizontalSpacing" Value="16" />
+            <Setter Property="VerticalSpacing" Value="4" />
+        </Style>
+    </Page.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <!-- Not the max-width element itself: a ScrollViewer centres its child by the child's desired width. -->
+        <Grid>
+        <StackPanel MaxWidth="{StaticResource PageMaxWidth}" Padding="32,8,32,32" Spacing="16">
+
+            <!-- App -->
+            <Border Style="{StaticResource CardStyle}">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Image Source="ms-appx:///Assets/PinyinFlux-256.png" Width="72" Height="72" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="PinyinFlux" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            <TextBlock Text="{x:Bind AppVersion}" VerticalAlignment="Bottom" Margin="0,0,0,3" Style="{StaticResource SecondaryTextStyle}" />
+                        </StackPanel>
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"
+                                   Text="让微软拼音用上国内云词库。原生注入实验模式在内存中扩展候选流程，保留微软原生候选框，不修改系统文件。" />
+                        <controls:WrapPanel Style="{StaticResource LinkRowStyle}" Margin="0,2,0,0">
+                            <HyperlinkButton Content="源代码" NavigateUri="https://github.com/TIANLI0/PinyinFlux" />
+                            <HyperlinkButton Content="更新日志" NavigateUri="https://github.com/TIANLI0/PinyinFlux/releases" />
+                        </controls:WrapPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- How it works -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="工作原理" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}">
+                        <Run Text="原生注入模式监听微软拼音内部的拼音变化通知，触发其原生云查询，再将 ChsProxyDS 的云请求重定向到本地核心，由核心查询百度、搜狗并返回 Bing 格式候选。候选显示、排序和选词仍由微软拼音完成。此模式依赖具体 Windows 版本与注入权限，钩子就绪不等于已验证选词上屏。" />
+                        <LineBreak /><LineBreak />
+                        <Run Text="关闭原生注入可使用旧代理模式，但该模式无法强制微软拼音联网。停止核心会恢复内存钩子；注入 DLL 保留为停用状态，直到输入法进程退出。设置窗口关闭后不常驻。" />
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <!-- Developer -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="开发者" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Ellipse Width="44" Height="44" VerticalAlignment="Center">
+                            <Ellipse.Fill>
+                                <ImageBrush ImageSource="ms-appx:///Assets/Author.png" Stretch="UniformToFill" />
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Text="Tianli" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <controls:WrapPanel Style="{StaticResource LinkRowStyle}">
+                                <HyperlinkButton Content="wutianli@tianli0.top" NavigateUri="mailto:wutianli@tianli0.top" />
+                                <HyperlinkButton Content="GitHub · TIANLI0" NavigateUri="https://github.com/TIANLI0" />
+                                <HyperlinkButton Content="tianli0.top" NavigateUri="https://tianli0.top" />
+                            </controls:WrapPanel>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Sponsor -->
+            <Border Style="{StaticResource CardStyle}">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="支持开发者" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"
+                                   Text="PinyinFlux 免费开源。如果它对你有帮助，欢迎赞助开发。" />
+                    </StackPanel>
+                    <Button Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource AccentButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xEB51;" FontSize="14" />
+                            <TextBlock Text="赞助" />
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="Bottom">
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="支持开发者" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="12">
+                                        <StackPanel Spacing="4">
+                                            <Image Source="ms-appx:///Assets/Support/alipay.png" Width="160" Height="240" Stretch="Uniform" />
+                                            <TextBlock Text="支付宝" HorizontalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Spacing="4">
+                                            <Image Source="ms-appx:///Assets/Support/wechat.png" Width="176" Height="240" Stretch="Uniform" />
+                                            <TextBlock Text="微信支付" HorizontalAlignment="Center" Style="{StaticResource SecondaryTextStyle}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- Feedback, with the version details an issue report asks for -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="反馈" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"
+                                   Text="如果云候选没有出现或结果不对，请附上 Windows 版本、使用的云词库，以及在“设置 → 诊断”中开启日志后得到的 core.log 片段。" />
+                    </StackPanel>
+                    <controls:SettingRow Header="版本信息" Description="{x:Bind SystemInfo}">
+                        <Button x:Name="CopyInfo" Content="复制" Click="OnCopySystemInfo" />
+                    </controls:SettingRow>
+                    <controls:WrapPanel Style="{StaticResource LinkRowStyle}">
+                        <HyperlinkButton Content="报告问题" NavigateUri="https://github.com/TIANLI0/PinyinFlux/issues" />
+                    </controls:WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Acknowledgements and legal -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="致谢" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"
+                                   Text="云词库接口的协议说明来自以下开源项目，感谢作者与贡献者。" />
+                    </StackPanel>
+                    <controls:WrapPanel Style="{StaticResource LinkRowStyle}">
+                        <HyperlinkButton Content="rime-cloud" NavigateUri="https://github.com/xiaobili/rime-cloud" />
+                        <HyperlinkButton Content="fcitx5-chinese-addons" NavigateUri="https://github.com/fcitx/fcitx5-chinese-addons" />
+                    </controls:WrapPanel>
+                    <controls:SettingRow Header="许可" Description="MIT 许可。Copyright (c) 2026 Tianli">
+                        <Button Content="查看 LICENSE" Click="OnOpenLicense" />
+                    </controls:SettingRow>
+                    <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"
+                               Text="PinyinFlux 是非官方社区项目，与微软、百度、搜狗无任何官方关系。各云词库接口均为非公开接口，可能随时变化或停止服务。" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>

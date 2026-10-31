@@ -1,0 +1,47 @@
+name: 问题反馈
+description: 看不到云词、钩子未就绪、崩溃或其他异常
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 安全问题请不要在这里提交，参见 SECURITY.md。
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 输入了什么拼音，期望看到什么，实际看到什么。截图很有帮助。
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows 版本
+      description: 运行 winver，例如“Windows 11 24H2 内部版本 26100.6899”
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PinyinFlux 版本
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: 核心是否已“提权重启”
+      options: [是, 否, 不确定]
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: 状态信息
+      description: 浏览器打开 http://127.0.0.1:18765/status，粘贴全部内容
+      render: json
+  - type: textarea
+    id: layout
+    attributes:
+      label: 布局解析输出（新 Windows 版本不支持时）
+      description: PinyinFluxLayoutTest.exe 的输出，见 docs/development.md
+      render: text

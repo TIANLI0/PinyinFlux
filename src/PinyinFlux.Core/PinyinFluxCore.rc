@@ -1,0 +1,30 @@
+// Icon and version info, so the resident core is recognizable in Task Manager and Startup apps.
+#include <winver.h>
+
+1 ICON "../PinyinFlux.App/Assets/PinyinFlux.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404b0"
+    BEGIN
+      VALUE "CompanyName", "Tianli"
+      VALUE "FileDescription", "PinyinFlux 云词库核心"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "InternalName", "PinyinFluxCore"
+      VALUE "LegalCopyright", "Copyright (c) 2026 Tianli"
+      VALUE "OriginalFilename", "PinyinFluxCore.exe"
+      VALUE "ProductName", "PinyinFlux"
+      VALUE "ProductVersion", "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0804, 1200
+  END
+END

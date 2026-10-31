@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PinyinFlux.App.Views.HomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PinyinFlux.App.Controls"
+    xmlns:services="using:PinyinFlux.App.Services">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <!-- Not the max-width element itself: a ScrollViewer centres its child by the child's desired width. -->
+        <Grid>
+        <StackPanel MaxWidth="{StaticResource PageMaxWidth}" Padding="32,8,32,32" Spacing="16">
+
+            <InfoBar IsOpen="True" IsClosable="False" Severity="Error" Title="找不到 PinyinFluxCore.exe"
+                     Message="它应与 PinyinFlux.exe 位于同一目录。请先运行仓库根目录的 build.ps1。"
+                     Visibility="{x:Bind services:Ui.Collapsed(ViewModel.CoreExists)}" />
+
+            <!-- Status -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="4" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Ellipse Style="{StaticResource StatusDotStyle}" Fill="{x:Bind StateBrush(ViewModel.State), Mode=OneWay}" />
+                                <TextBlock Text="{x:Bind ViewModel.Title, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            </StackPanel>
+                            <TextBlock Text="{x:Bind ViewModel.Summary, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <ProgressRing IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" Width="20" Height="20" />
+                            <Button Content="安装并启动" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.InstallCommand}"
+                                    Visibility="{x:Bind services:Ui.Collapsed(ViewModel.IsInstalled), Mode=OneWay}" />
+                            <Button Content="启动" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.StartCommand}"
+                                    Visibility="{x:Bind ShowStart(ViewModel.State), Mode=OneWay}" />
+                            <Button Content="停止" Command="{x:Bind ViewModel.StopCommand}"
+                                    Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}" />
+                            <Button Content="提权重启" Command="{x:Bind ViewModel.RestartElevatedCommand}"
+                                    Visibility="{x:Bind services:Ui.Visible(ViewModel.NeedsElevation), Mode=OneWay}" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{x:Bind ViewModel.Message, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" IsTextSelectionEnabled="True"
+                               Visibility="{x:Bind services:Ui.VisibleIfText(ViewModel.Message), Mode=OneWay}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Statistics (since the core started) -->
+            <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="本次运行" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <Grid ColumnSpacing="16" RowSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="云候选请求" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.CloudRequests, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="给出候选" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.Answered, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="2">
+                            <TextBlock Text="缓存命中" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.CacheHits, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Spacing="2">
+                            <TextBlock Text="平均联网耗时" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.Latency, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="核心内存" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.Memory, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2" Spacing="2">
+                            <TextBlock Text="最近一次查询" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.LastQuery, Mode=OneWay}" Style="{StaticResource StatValueStyle}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Try it -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="试一试" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Text="返回的就是微软拼音会显示的云候选。" Style="{StaticResource SecondaryTextStyle}" />
+                    </StackPanel>
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox PlaceholderText="输入拼音，例如 yyds 或 woxiangchifan" Text="{x:Bind ViewModel.TestInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 KeyDown="OnTestKeyDown" />
+                        <Button Grid.Column="1" Content="查询" Command="{x:Bind ViewModel.TestCommand}" />
+                    </Grid>
+                    <ItemsRepeater ItemsSource="{x:Bind ViewModel.TestResults}">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Orientation="Horizontal" Spacing="8" />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        BorderThickness="1" CornerRadius="6" Padding="12,6">
+                                    <TextBlock Text="{x:Bind}" Style="{StaticResource BodyTextBlockStyle}" IsTextSelectionEnabled="True" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                    <TextBlock Text="{x:Bind ViewModel.TestMessage, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}"
+                               Visibility="{x:Bind services:Ui.VisibleIfText(ViewModel.TestMessage), Mode=OneWay}" />
+                </StackPanel>
+            </Border>
+
+            <!-- Health -->
+            <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="运行状况" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <controls:SettingRow Header="本地证书" Description="原生注入不需要；旧代理模式用于 Bing TLS 连接。">
+                        <TextBlock Text="{x:Bind ViewModel.CertState, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Header="系统代理" Description="原生注入不需要；旧代理模式才使用 PAC。">
+                        <TextBlock Text="{x:Bind ViewModel.ProxyState, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Header="微软拼音原生连接" Description="显示钩子就绪数、拼音变化触发次数及重定向请求数。云候选显示与选词需实际验证。">
+                        <TextBlock Text="{x:Bind ViewModel.ImeSessions, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>

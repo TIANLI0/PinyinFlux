@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="PinyinFlux.App.Views.SourcesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:PinyinFlux.App.Controls"
+    xmlns:services="using:PinyinFlux.App.Services"
+    xmlns:vm="using:PinyinFlux.App.ViewModels">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid>
+        <StackPanel MaxWidth="{StaticResource PageMaxWidth}" Padding="32,8,32,32" Spacing="16">
+
+            <InfoBar IsOpen="True" IsClosable="False" Severity="Warning" Title="没有启用任何云词库"
+                     Message="微软拼音将拿不到云候选。至少启用一个来源。"
+                     Visibility="{x:Bind services:Ui.Collapsed(ViewModel.HasEnabledProvider), Mode=OneWay}" />
+
+            <!-- Sources, in priority order -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="云词库来源" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Text="同时向已启用的来源查询，按顺序合并结果：排在前面的优先。只采用覆盖整段拼音的候选。"
+                                   Style="{StaticResource SecondaryTextStyle}" />
+                    </StackPanel>
+                    <ItemsRepeater ItemsSource="{x:Bind ViewModel.Providers}">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Spacing="12" />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ProviderItemViewModel">
+                                <controls:SettingRow Header="{x:Bind Name}" Description="{x:Bind Description}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <Button Style="{StaticResource SubtleButtonStyle}" Command="{x:Bind MoveUpCommand}" IsEnabled="{x:Bind CanMoveUp, Mode=OneWay}"
+                                                ToolTipService.ToolTip="提高优先级">
+                                            <FontIcon Glyph="&#xE70E;" FontSize="12" />
+                                        </Button>
+                                        <Button Style="{StaticResource SubtleButtonStyle}" Command="{x:Bind MoveDownCommand}" IsEnabled="{x:Bind CanMoveDown, Mode=OneWay}"
+                                                ToolTipService.ToolTip="降低优先级">
+                                            <FontIcon Glyph="&#xE70D;" FontSize="12" />
+                                        </Button>
+                                        <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" Margin="8,0,0,0" IsOn="{x:Bind IsEnabled, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </controls:SettingRow>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                </StackPanel>
+            </Border>
+
+            <!-- Sogou network workaround -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="搜狗" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <controls:SettingRow Header="直连 IP" Description="shouji.sogou.com 在部分网络会被 DNS 污染。填入它的公网 IP 即可绕过解析；留空则正常解析。">
+                        <TextBox Width="200" PlaceholderText="例如 129.226.102.244" Text="{x:Bind ViewModel.SogouIp, Mode=TwoWay}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>

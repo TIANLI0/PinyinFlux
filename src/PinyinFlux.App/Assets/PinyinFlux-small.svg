@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Small-size variant of PinyinFlux.svg (16-32 px): the cloud fills the frame, no shadow or
+       sheen, and heavier strokes so "ā" survives being a dozen pixels wide. -->
+  <defs>
+    <linearGradient id="cloud" x1="40" y1="44" x2="216" y2="212" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3FB0FF" />
+      <stop offset="0.55" stop-color="#3D7BFF" />
+      <stop offset="1" stop-color="#6A4BFF" />
+    </linearGradient>
+  </defs>
+  <g transform="translate(-35.7,-23.1) scale(1.24)">
+    <g fill="url(#cloud)">
+      <circle cx="140" cy="102" r="62" />
+      <circle cx="78" cy="132" r="46" />
+      <circle cx="190" cy="138" r="42" />
+      <rect x="32" y="128" width="200" height="76" rx="38" />
+    </g>
+    <g fill="none" stroke="#FFFFFF" stroke-linecap="round">
+      <line x1="100" y1="88" x2="160" y2="88" stroke-width="22" />
+      <circle cx="122" cy="152" r="27" stroke-width="22" />
+      <line x1="156" y1="124" x2="156" y2="178" stroke-width="22" />
+    </g>
+  </g>
+</svg>
