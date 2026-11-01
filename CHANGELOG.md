@@ -1,6 +1,8 @@
 # 更新日志
 
-版本号与 `Directory.Build.props` 中的 `VersionPrefix` 一致。推送到 main 后，最上方的版本若还没有对应的 Release，CI 会自动发布；最上方为 `## [0.2.0] - 2026-11-01 · 打字统计与一键启用
+版本号与 `Directory.Build.props` 中的 `VersionPrefix` 一致。推送到 main 后，最上方的版本若还没有对应的 Release，CI 会自动发布；最上方为 `## [Unreleased]` 时不发布。
+
+## [0.2.0] - 2026-11-01 · 打字统计与一键启用
 
 ### 新增
 
