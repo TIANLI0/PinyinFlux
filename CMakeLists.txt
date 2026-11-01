@@ -34,6 +34,7 @@ add_executable(PinyinFluxCore WIN32
   src/PinyinFlux.Core/proxy_server.cpp
   src/PinyinFlux.Core/native_injector.cpp
   src/PinyinFlux.Core/native_symbols.cpp
+  src/PinyinFlux.Core/typing_stats.cpp
   src/PinyinFlux.Core/PinyinFluxCore.rc
 )
 # The .rc is UTF-8 (Chinese file description).

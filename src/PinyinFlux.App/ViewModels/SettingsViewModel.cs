@@ -39,11 +39,29 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public int Port => _config.Port;
 
-    public bool NativeInjection
+    /// <summary>0 = 直接接入 (native injection), 1 = 兼容模式 (PAC proxy + local certificate).</summary>
+    public int ConnectionMode
     {
-        get => _config.NativeInjection;
-        set => Update(() => _config.NativeInjection = value);
+        get => _config.NativeInjection ? 0 : 1;
+        set
+        {
+            bool native = value == 0;
+            if (value < 0 || native == _config.NativeInjection) return;
+            Update(() => _config.NativeInjection = native);
+            OnPropertyChanged(nameof(IsCompatibilityMode));
+            OnPropertyChanged(nameof(ConnectionModeDescription));
+            ConnectionModeChanged?.Invoke(native);
+        }
     }
+
+    /// <summary>Raised after the mode is saved, with true for native injection; a running core has to be started again.</summary>
+    public event Action<bool>? ConnectionModeChanged;
+
+    public bool IsCompatibilityMode => !_config.NativeInjection;
+
+    public string ConnectionModeDescription => _config.NativeInjection
+        ? "在微软拼音内部补充云词，打字停顿即可出现。不安装证书，不改动网络设置；需要授予一次管理员权限。"
+        : "直接接入不可用时的备选：安装一个本机证书，并让系统代理把微软拼音发往 Bing 的云请求交给 PinyinFlux。何时查询由微软拼音决定，云词出现得较少。";
 
     public double TimeoutMs
     {
@@ -67,6 +85,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         get => _config.ReclaimProxy;
         set => Update(() => _config.ReclaimProxy = value);
+    }
+
+    /// <summary>The core counts committed characters (direct mode only); never what was typed.</summary>
+    public bool TypingStats
+    {
+        get => _config.TypingStats;
+        set => Update(() => _config.TypingStats = value);
     }
 
     public bool LogToFile
@@ -105,6 +130,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public bool HasEnabledProvider => Providers.Any(p => p.IsEnabled);
 
+    /// <summary>"百度输入法云、搜狗输入法云", in priority order.</summary>
+    public string EnabledProviderNames => HasEnabledProvider ? string.Join("、", Providers.Where(p => p.IsEnabled).Select(p => p.Name)) : "未启用任何云词库";
+
     [RelayCommand]
     private static void OpenDataFolder()
     {
@@ -125,6 +153,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     internal void SaveProviders()
     {
         Update(() => _config.Providers = Providers.Where(p => p.IsEnabled).Select(p => p.Id).ToList(), nameof(HasEnabledProvider));
+        OnPropertyChanged(nameof(EnabledProviderNames));
     }
 
     private void Renumber()

@@ -13,6 +13,7 @@ public sealed partial class MainWindow : Window
     {
         ["Home"] = typeof(HomePage),
         ["Sources"] = typeof(SourcesPage),
+        ["Stats"] = typeof(StatsPage),
         ["Settings"] = typeof(SettingsPage),
         ["About"] = typeof(AboutPage),
     };

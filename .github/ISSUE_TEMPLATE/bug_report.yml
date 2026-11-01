@@ -29,7 +29,7 @@ body:
   - type: dropdown
     id: elevated
     attributes:
-      label: 核心是否已“提权重启”
+      label: 是否已点击过“授予权限”
       options: [是, 否, 不确定]
     validations:
       required: true

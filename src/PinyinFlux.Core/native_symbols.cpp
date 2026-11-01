@@ -288,6 +288,7 @@ std::string ResolveNativeLayout(native::NativeLayout& layout) {
     engine.Fill(e.filterSuggestions, "ChxIME::CandidateHandlerConversionOfCloud::FilterSuggestionList");
     engine.Fill(e.spellQuery, "ChxIME::CandidateHandlerConversionOfCloud::GetSpellQueryFromResult");
     engine.Fill(e.displayOrder, "ChxIME::ResultHandlerPinyin::GetCOCExcerptDisplayOrder");
+    engine.Fill(e.commitText, "ChxIME::ProductItemPool::SetPrevPrimitive");
     complete = complete && e.listClass && e.listInterface && EngineFields(engine, e);
     if (!complete) e.pinyinChanged.rva = 0;  // the extension then reports Unsupported
     summary += "InputService " + Describe(engine, complete);

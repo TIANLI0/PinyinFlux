@@ -27,7 +27,9 @@ public sealed partial class AboutPage : Page
     public string AppVersion => "v" + Version;
 
     /// <summary>What an issue report needs: app version, Windows build, architecture and runtime. Not localized, so it pastes the same everywhere.</summary>
-    public string SystemInfo => $"PinyinFlux {Version} ({Arch(RuntimeInformation.ProcessArchitecture)}) · "
+    public string SystemInfo => SystemInfoText;
+
+    public static string SystemInfoText { get; } = $"PinyinFlux {Version} ({Arch(RuntimeInformation.ProcessArchitecture)}) · "
         + $"Windows {WindowsBuild()} {Arch(RuntimeInformation.OSArchitecture)} · .NET {Environment.Version}";
 
     private static string Arch(Architecture architecture) => architecture.ToString().ToLowerInvariant();

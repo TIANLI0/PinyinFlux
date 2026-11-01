@@ -26,7 +26,9 @@ public sealed record CoreStatus(
     long NativeErrors,
     long NativeLastError,
     long NativeTriggers,
-    long NativeRequests);
+    long NativeRequests,
+    bool TypingEnabled,
+    TypingDay? TypingToday);
 
 /// <summary>Talks to PinyinFluxCore.exe: its loopback status endpoint and its command-line verbs.</summary>
 public sealed class CoreClient : IDisposable
@@ -66,11 +68,25 @@ public sealed class CoreClient : IDisposable
                 Num(r, "workingSetKB"),
                 Bool(r, "nativeMode"), Num(r, "nativeReady"), Num(r, "nativePending"),
                 Num(r, "nativeDenied"), Num(r, "nativeUnsupported"), Num(r, "nativeErrors"),
-                Num(r, "nativeLastError"), Num(r, "nativeTriggers"), Num(r, "nativeRequests"));
+                Num(r, "nativeLastError"), Num(r, "nativeTriggers"), Num(r, "nativeRequests"),
+                Bool(r, "typingEnabled"), Typing(r));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
         {
             return null;  // not running
+        }
+    }
+
+    /// <summary>The /status JSON as served, for diagnostics. Null when the core isn't running.</summary>
+    public async Task<string?> GetRawStatusAsync(int port, CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetStringAsync($"http://127.0.0.1:{port}/status", ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            return null;
         }
     }
 
@@ -159,6 +175,14 @@ public sealed class CoreClient : IDisposable
     }
 
     public void Dispose() => _http.Dispose();
+
+    /// <summary>"typing": today's counts so far, including those not yet written to stats.csv.</summary>
+    private static TypingDay? Typing(JsonElement e) =>
+        e.TryGetProperty("typing", out var t) && t.ValueKind == JsonValueKind.Object &&
+        DateOnly.TryParseExact(Str(t, "date"), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var date)
+            ? new TypingDay(date, Num(t, "commits"), Num(t, "chars"), Num(t, "letters"), Num(t, "cloud"), Num(t, "activeSeconds"))
+            : null;
 
     private static string Str(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";

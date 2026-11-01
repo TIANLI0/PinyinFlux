@@ -18,12 +18,13 @@
 namespace pf {
 
 inline constexpr wchar_t kAppName[] = L"PinyinFlux";
-inline constexpr char kVersion[] = "0.1.1";
+inline constexpr char kVersion[] = "0.2.0";
 
 // Named kernel objects shared with the settings UI.
 inline constexpr wchar_t kMutexName[] = L"Local\\PinyinFlux.Core";
 inline constexpr wchar_t kReloadEventName[] = L"Local\\PinyinFlux.Reload";
 inline constexpr wchar_t kExitEventName[] = L"Local\\PinyinFlux.Exit";
+inline constexpr wchar_t kClearTypingEventName[] = L"Local\\PinyinFlux.ClearTyping";
 
 std::wstring Utf8ToWide(std::string_view s);
 std::string WideToUtf8(std::wstring_view s);

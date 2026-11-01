@@ -17,6 +17,7 @@ public sealed partial class CoreConfig
     public bool ImeOnly { get; set; } = true;
     public bool LogToFile { get; set; }
     public bool ReclaimProxy { get; set; } = true;
+    public bool TypingStats { get; set; } = true;
     public string SogouIp { get; set; } = "";
 
     // [App]: settings of this app only; the core ignores the section.
@@ -38,6 +39,7 @@ public sealed partial class CoreConfig
         c.ImeOnly = ReadInt("Core", "ImeOnly", 1) != 0;
         c.LogToFile = ReadInt("Core", "Log", 0) != 0;
         c.ReclaimProxy = ReadInt("Core", "ReclaimProxy", 1) != 0;
+        c.TypingStats = ReadInt("Core", "TypingStats", 1) != 0;
         string providers = ReadString("Core", "Providers", "");
         if (!string.IsNullOrWhiteSpace(providers))
         {
@@ -60,6 +62,7 @@ public sealed partial class CoreConfig
         Write("Core", "ImeOnly", ImeOnly ? "1" : "0");
         Write("Core", "Log", LogToFile ? "1" : "0");
         Write("Core", "ReclaimProxy", ReclaimProxy ? "1" : "0");
+        Write("Core", "TypingStats", TypingStats ? "1" : "0");
         Write("Core", "Providers", string.Join(',', Providers));
         Write("Sogou", "Ip", SogouIp);
         Write("App", "AutoUpdate", AutoUpdate ? "1" : "0");

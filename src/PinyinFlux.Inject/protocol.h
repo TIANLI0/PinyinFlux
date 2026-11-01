@@ -41,6 +41,8 @@ struct EngineLayout {
   Function candidateRule;    // ChsIME::CandidateHandlerConversionOfCloud::CheckCOCTriggerCandidateRule
   DWORD cloudBase = 0;       // cloudChanged this -> rule object
   Function doCloudQuery, requestSuggestion, suggestionReady, filterSuggestions, spellQuery, displayOrder;
+  // Typing statistics (optional): receives every committed conversion and its reading.
+  Function commitText;       // ChxIME::ProductItemPool::SetPrevPrimitive
 };
 // Legacy ChsEM.dll (ChsIME.exe host): only the cloud handler is patched.
 struct LegacyLayout {
@@ -79,10 +81,17 @@ struct Channel {
   volatile LONG lastFlags = 0;
   volatile LONG settingsResult = 0;
   volatile LONG diagnostics[36]{};
+  // Typing statistics, counted by the extension while statsEnabled; never the text itself.
+  volatile LONG statsEnabled = 0;  // written by the core from its config
+  volatile LONG statCommits = 0;   // committed conversions
+  volatile LONG statChars = 0;     // Chinese characters in them
+  volatile LONG statLetters = 0;   // pinyin letters typed for them
+  volatile LONG statCloud = 0;     // conversions that were a PinyinFlux cloud word
+  volatile LONG statActiveMs = 0;  // typing time, pauses excluded
   NativeLayout layout;  // written by the core before the extension initializes
 };
 inline std::wstring MappingName(DWORD process) {
-  return L"Local\\PinyinFlux.Native.v5." + std::to_wstring(process);
+  return L"Local\\PinyinFlux.Native.v6." + std::to_wstring(process);
 }
 inline bool Enabled(Channel* c) {
   return c && c->magic == kMagic && InterlockedCompareExchange(&c->enabled, 0, 0) &&

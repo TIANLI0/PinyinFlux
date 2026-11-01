@@ -3,6 +3,7 @@
 #include "../PinyinFlux.Inject/protocol.h"
 #include "json.h"
 #include "log.h"
+#include "config.h"
 #include "native_symbols.h"
 #include <tlhelp32.h>
 #include <wincrypt.h>
@@ -16,6 +17,7 @@ struct Entry {
   DWORD pid = 0, error = 0;
   HANDLE process = nullptr, mapping = nullptr;
   native::Channel* channel = nullptr;
+  ULONG typingSeen[5]{};  // statistics counters already added to TypingStats
   ~Entry() {
     if (channel) UnmapViewOfFile(channel);
     if (mapping) CloseHandle(mapping);
@@ -168,7 +170,7 @@ void NativeInjector::Run() {
   { std::lock_guard lock(layoutMutex_); layoutSummary_ = summary; }
   std::vector<std::unique_ptr<Entry>> entries;
   DWORD session = 0; ProcessIdToSessionId(GetCurrentProcessId(), &session);
-  DWORD scanned = 0;
+  DWORD scanned = 0, flushed = GetTickCount();
   while (WaitForSingleObject(stop_, 100) == WAIT_TIMEOUT) {
     if (GetTickCount() - scanned >= 2000) {
       scanned = GetTickCount();
@@ -233,11 +235,23 @@ void NativeInjector::Run() {
       lastFlags_ = InterlockedCompareExchange(&c->lastFlags, 0, 0);
       settingsResult_ = InterlockedCompareExchange(&c->settingsResult, 0, 0);
       for (int i = 0; i < 36; ++i) diagnostics_[i] = InterlockedCompareExchange(&c->diagnostics[i], 0, 0);
+      InterlockedExchange(&c->statsEnabled, CurrentConfig()->typingStats ? 1 : 0);
+      // The extension's counters only grow (and may wrap); take what's new since the last pass.
+      volatile LONG* counters[5] = {&c->statCommits, &c->statChars, &c->statLetters, &c->statCloud, &c->statActiveMs};
+      ULONG delta[5]{};
+      for (int i = 0; i < 5; ++i) {
+        ULONG now = static_cast<ULONG>(InterlockedCompareExchange(counters[i], 0, 0));
+        delta[i] = now - entry->typingSeen[i];
+        entry->typingSeen[i] = now;
+      }
+      typing_.Add({delta[0], delta[1], delta[2], delta[3], delta[4]});
     }
+    if (GetTickCount() - flushed >= 60 * 1000) { flushed = GetTickCount(); typing_.Flush(); }
     ready_ = ready; pending_ = pending; denied_ = denied; unsupported_ = unsupported; errors_ = errors;
     triggers_ = triggers; requests_ = requests;
     notifications_ = notifications;
   }
+  typing_.Flush();
   for (const auto& entry : entries) if (entry->channel) InterlockedExchange(&entry->channel->enabled, 0);
   // Wait for the DLL to restore its slots before a replacement version can
   // install new hooks in the same host. Callback storage remains mapped there.
@@ -281,6 +295,7 @@ std::string NativeInjector::StatusJson() const {
       ",\"nativeRefreshResult\":" + std::to_string(diagnostics_[29].load()) + ",\"nativeOrderCalls\":" + std::to_string(diagnostics_[30].load()) +
       ",\"nativeOrder\":" + std::to_string(diagnostics_[31].load()) +
       ",\"nativeArrivals\":" + std::to_string(diagnostics_[32].load()) + ",\"nativeReplays\":" + std::to_string(diagnostics_[33].load()) +
-      ",\"nativeArrivalWords\":" + std::to_string(diagnostics_[34].load()) + ",\"nativeDebounceSkips\":" + std::to_string(diagnostics_[35].load());
+      ",\"nativeArrivalWords\":" + std::to_string(diagnostics_[34].load()) + ",\"nativeDebounceSkips\":" + std::to_string(diagnostics_[35].load()) +
+      ",\"typingEnabled\":" + (CurrentConfig()->typingStats ? "true" : "false") + typing_.Json();
 }
 }  // namespace pf

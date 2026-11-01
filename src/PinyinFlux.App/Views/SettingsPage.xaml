@@ -13,8 +13,40 @@
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="12">
                     <TextBlock Text="常规" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <controls:SettingRow Header="开机自动启动" Description="只启动后台核心。若注入需要管理员权限，在概览中点击一次“提权重启”并确认 UAC 后，PinyinFlux 会登记一个仅供自身使用的计划任务，之后开机自启会直接以管理员权限运行；卸载时删除该任务。">
+                    <controls:SettingRow Header="开机自动启动" Description="登录 Windows 后在后台运行，不显示窗口。授予过一次管理员权限后，开机启动不会再弹出确认。">
                         <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.StartWithWindows, Mode=TwoWay}" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <!-- Microsoft Pinyin's own settings that matter here -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="微软拼音" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <controls:SettingRow Header="云候选" Description="{x:Bind CloudSwitchText(Status.PinyinCloudEnabled), Mode=OneWay}">
+                        <Button Content="打开" Command="{x:Bind Status.EnableCloudCandidatesCommand}"
+                                Visibility="{x:Bind ShowEnableCloud(Status.PinyinCloudEnabled), Mode=OneWay}" />
+                    </controls:SettingRow>
+                    <controls:SettingRow Header="微软拼音设置" Description="模糊音、快捷键、候选个数、自学习词库等由微软拼音管理，PinyinFlux 不会改动。">
+                        <Button Content="打开" Click="OnOpenPinyinSettings" />
+                    </controls:SettingRow>
+                </StackPanel>
+            </Border>
+
+            <!-- Query -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="云词" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                   Text="输入 4 个及以上字母后查询，支持全拼、简拼（yyds）和混拼（yuanshenqd）。微软拼音的第 1 位始终保留，本地没有的云词放在第 2 位，最多 3 个。" />
+                    </StackPanel>
+                    <controls:SettingRow Header="云词库响应时限" Description="某个云词库超过这个时间没回应就先跳过，它的结果留到下次输入同样的拼音时使用。网络较慢时可调高。">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Slider Width="{StaticResource RowSliderWidth}" Minimum="300" Maximum="3000" StepFrequency="100" VerticalAlignment="Center"
+                                    Value="{x:Bind ViewModel.TimeoutMs, Mode=TwoWay}" />
+                            <TextBlock MinWidth="56" VerticalAlignment="Center" Text="{x:Bind services:Ui.Milliseconds(ViewModel.TimeoutMs), Mode=OneWay}" />
+                        </StackPanel>
                     </controls:SettingRow>
                 </StackPanel>
             </Border>
@@ -40,51 +72,42 @@
                             <HyperlinkButton Content="在 GitHub 上查看" NavigateUri="{x:Bind Updates.ReleaseNotesUrl, Mode=OneWay}" Padding="0" />
                         </StackPanel>
                     </Expander>
-                    <controls:SettingRow Header="自动检查并下载更新" Description="打开 PinyinFlux 时检查 GitHub Releases，后台下载并校验新版本；安装前会先询问。">
+                    <controls:SettingRow Header="自动检查并下载更新" Description="打开 PinyinFlux 时检查新版本，在后台下载并校验；安装前会先询问。">
                         <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.AutoUpdate, Mode=TwoWay}" />
                     </controls:SettingRow>
-                    <controls:SettingRow Header="接收预览版" Description="预览版包含尚未完全验证的改动。">
+                    <controls:SettingRow Header="接收预览版" Description="提前体验新功能，但可能不太稳定。">
                         <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.IncludePrerelease, Mode=TwoWay}" />
                     </controls:SettingRow>
                 </StackPanel>
             </Border>
-            <!-- Query -->
-            <Border Style="{StaticResource CardStyle}">
-                <StackPanel Spacing="12">
-                    <TextBlock Text="查询" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock Text="保留本地首选，云端有本地没有的词时才进入原生第 2 位；等待、无结果、超时或与本地重复时候选不变。至少 4 个字母才查询，支持简拼与混拼。" TextWrapping="Wrap" Foreground="{StaticResource TextFillColorSecondaryBrush}" />
-                    <controls:SettingRow Header="超时" Description="来源超过此时间会被跳过；原生候选最多等待 450 毫秒，迟到的结果回填缓存供下次使用。成功结果缓存 30 分钟，部分失败只缓存 60 秒。">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <Slider Width="{StaticResource RowSliderWidth}" Minimum="300" Maximum="3000" StepFrequency="100" VerticalAlignment="Center"
-                                    Value="{x:Bind ViewModel.TimeoutMs, Mode=TwoWay}" />
-                            <TextBlock MinWidth="56" VerticalAlignment="Center" Text="{x:Bind services:Ui.Milliseconds(ViewModel.TimeoutMs), Mode=OneWay}" />
-                        </StackPanel>
-                    </controls:SettingRow>
-                    <controls:SettingRow Header="最多候选数" Description="旧代理模式与诊断查询返回的云候选个数。原生模式自动决定：最可信的一个，加上两个词库都排在前两名的词，最多 3 个。">
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <Slider Width="{StaticResource RowSliderWidth}" Minimum="1" Maximum="8" StepFrequency="1" TickFrequency="1" TickPlacement="BottomRight"
-                                    VerticalAlignment="Center" Value="{x:Bind ViewModel.MaxCandidates, Mode=TwoWay}" />
-                            <TextBlock MinWidth="56" VerticalAlignment="Center" Text="{x:Bind services:Ui.Number(ViewModel.MaxCandidates), Mode=OneWay}" />
-                        </StackPanel>
-                    </controls:SettingRow>
-                </StackPanel>
-            </Border>
 
-            <!-- Interception -->
+            <!-- Connection mode -->
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="12">
-                    <TextBlock Text="拦截" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <controls:SettingRow Header="原生注入（实验）" Description="主动触发微软原生云候选，不使用独立候选窗。首次运行按本机 Windows 版本下载微软公开符号自动适配，可能需要管理员权限。切换后需重新启动核心；关闭则使用旧代理模式。">
-                        <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.NativeInjection, Mode=TwoWay}" />
+                    <TextBlock Text="高级" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <controls:SettingRow Header="接入方式" Description="{x:Bind ViewModel.ConnectionModeDescription, Mode=OneWay}">
+                        <ComboBox MinWidth="180" SelectedIndex="{x:Bind ViewModel.ConnectionMode, Mode=TwoWay}">
+                            <x:String>直接接入（推荐）</x:String>
+                            <x:String>兼容模式</x:String>
+                        </ComboBox>
                     </controls:SettingRow>
-                    <controls:SettingRow Header="只解密微软拼音的连接"
-                                         Description="仅旧代理模式有效。浏览器等其他程序访问 Bing 的流量原样加密转发。">
-                        <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.ImeOnly, Mode=TwoWay}" />
-                    </controls:SettingRow>
-                    <controls:SettingRow Header="代理设置被改写时重新接管"
-                                         Description="仅旧代理模式有效。其他代理工具改写系统代理后重新应用 PAC，10 分钟内最多 3 次。">
-                        <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.ReclaimProxy, Mode=TwoWay}" />
-                    </controls:SettingRow>
+                    <TextBlock Text="{x:Bind Status.ModeMessage, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}"
+                               Visibility="{x:Bind services:Ui.VisibleIfText(Status.ModeMessage), Mode=OneWay}" />
+                    <StackPanel Spacing="12" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsCompatibilityMode), Mode=OneWay}">
+                        <controls:SettingRow Header="云词个数" Description="每次给微软拼音的云词个数。">
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <Slider Width="{StaticResource RowSliderWidth}" Minimum="1" Maximum="8" StepFrequency="1" TickFrequency="1" TickPlacement="BottomRight"
+                                        VerticalAlignment="Center" Value="{x:Bind ViewModel.MaxCandidates, Mode=TwoWay}" />
+                                <TextBlock MinWidth="56" VerticalAlignment="Center" Text="{x:Bind services:Ui.Number(ViewModel.MaxCandidates), Mode=OneWay}" />
+                            </StackPanel>
+                        </controls:SettingRow>
+                        <controls:SettingRow Header="只处理微软拼音的连接" Description="浏览器等其他程序访问 Bing 时原样转发，不经证书解密。">
+                            <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.ImeOnly, Mode=TwoWay}" />
+                        </controls:SettingRow>
+                        <controls:SettingRow Header="代理被其他软件改写时自动恢复" Description="其他代理软件改写系统代理后重新指向 PinyinFlux，10 分钟内最多 3 次，避免和它们来回争抢。">
+                            <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.ReclaimProxy, Mode=TwoWay}" />
+                        </controls:SettingRow>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -92,11 +115,16 @@
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="12">
                     <TextBlock Text="诊断" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <controls:SettingRow Header="写入日志" Description="记录每次云查询（包含输入的拼音）到 core.log，最大 2 MB。排查问题时再开。">
+                    <controls:SettingRow Header="复制诊断信息" Description="版本、微软拼音设置和后台运行状态，反馈问题时附上即可。">
+                        <Button Content="复制" Command="{x:Bind Status.CopyDiagnosticsCommand}" />
+                    </controls:SettingRow>
+                    <TextBlock Text="{x:Bind Status.DiagnosticsMessage, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}"
+                               Visibility="{x:Bind services:Ui.VisibleIfText(Status.DiagnosticsMessage), Mode=OneWay}" />
+                    <controls:SettingRow Header="写入日志" Description="把每次查询（包含输入的拼音）记录到 core.log，最大 2 MB。仅在排查问题时打开。">
                         <ToggleSwitch Style="{StaticResource TrailingSwitchStyle}" IsOn="{x:Bind ViewModel.LogToFile, Mode=TwoWay}" />
                     </controls:SettingRow>
-                    <controls:SettingRow Header="数据目录" Description="配置、日志和代理设置备份。">
-                        <Button Content="打开文件夹" Command="{x:Bind ViewModel.OpenDataFolderCommand}" />
+                    <controls:SettingRow Header="数据文件夹" Description="设置、日志和系统代理的备份。">
+                        <Button Content="打开" Command="{x:Bind ViewModel.OpenDataFolderCommand}" />
                     </controls:SettingRow>
                 </StackPanel>
             </Border>
@@ -106,7 +134,7 @@
                 <StackPanel Spacing="12">
                     <TextBlock Text="停用" Style="{StaticResource BodyStrongTextBlockStyle}" />
                     <controls:SettingRow Header="撤销 PinyinFlux 对系统的所有改动"
-                                         Description="停止核心，恢复原来的代理设置，删除本地证书及私钥，取消开机启动。程序本身仍保留，可随时在“概览”重新启用；要彻底删除请在“Windows 设置 → 应用”中卸载，卸载程序会自动完成同样的还原。">
+                                         Description="停止后台运行，取消开机启动，并删除兼容模式用过的证书、恢复系统代理。程序本身保留，可随时在“概览”中重新启用；在“Windows 设置 → 应用”中卸载也会自动完成同样的还原。">
                         <Button Content="停用并还原" Command="{x:Bind Status.UninstallCommand}" />
                     </controls:SettingRow>
                     <TextBlock Text="{x:Bind Status.Message, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}"

@@ -5,7 +5,7 @@
 ; native core and injection DLL. Installation is per user. The input host may require the core
 ; to be restarted with UAC from the settings app before native integration becomes available.
 ;
-; Enabling (postinstall checkbox, or "安装并启动" in the app) runs PinyinFluxCore.exe --install:
+; Enabling (postinstall checkbox, or "一键启用" in the app) runs PinyinFluxCore.exe --install:
 ; Native mode does not create a certificate or install a PAC. Legacy proxy mode retains both.
 ;
 ; Upgrade ("覆盖升级"):
@@ -22,10 +22,10 @@
 ; %LOCALAPPDATA%\PinyinFlux are deleted only if the user agrees.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.2.0"
 #endif
 #ifndef AppVersionNumeric
-  #define AppVersionNumeric "0.1.1.0"
+  #define AppVersionNumeric "0.2.0.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\artifacts\PinyinFlux-win-x64"

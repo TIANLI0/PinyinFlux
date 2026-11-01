@@ -30,7 +30,7 @@ int main() {
     Check(e.pinyinChanged.rva == 0x1083b0 && e.triggerRule.rva == 0x106d3c && e.preloading.rva == 0x2bc30c &&
               e.setExcerpts.rva == 0x29aa00 && e.desktopChanged.rva == 0x10a110 && e.listClass == 0x412770 &&
               e.listInterface == 0x412760 && e.cloudChanged.rva == 0x2048b0 && e.settingRule.rva == 0x203698 &&
-              e.candidateRule.rva == 0x202f08,
+              e.candidateRule.rva == 0x202f08 && e.commitText.rva == 0x29aae0,
           "verified build: functions match the disassembly");
     Check(e.excerpts == 0x278 && e.ruleFlags[0] == 0x228 && e.ruleFlags[1] == 0x22b && e.ruleFlags[2] == 0x22c &&
               e.ruleSettings == 0x1f8 && e.settingsSlots[0] == 0x278 && e.settingsSlots[1] == 0xd8 &&

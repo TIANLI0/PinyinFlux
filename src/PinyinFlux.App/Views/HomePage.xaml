@@ -10,8 +10,8 @@
         <Grid>
         <StackPanel MaxWidth="{StaticResource PageMaxWidth}" Padding="32,8,32,32" Spacing="16">
 
-            <InfoBar IsOpen="True" IsClosable="False" Severity="Error" Title="找不到 PinyinFluxCore.exe"
-                     Message="它应与 PinyinFlux.exe 位于同一目录。请先运行仓库根目录的 build.ps1。"
+            <InfoBar IsOpen="True" IsClosable="False" Severity="Error" Title="PinyinFlux 安装不完整"
+                     Message="找不到后台程序 PinyinFluxCore.exe，请重新安装 PinyinFlux。（开发者：先运行仓库根目录的 build.ps1。）"
                      Visibility="{x:Bind services:Ui.Collapsed(ViewModel.CoreExists)}" />
 
             <!-- Status -->
@@ -31,14 +31,16 @@
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <ProgressRing IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" Width="20" Height="20" />
-                            <Button Content="安装并启动" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.InstallCommand}"
+                            <Button Content="一键启用" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.SetupCommand}"
                                     Visibility="{x:Bind services:Ui.Collapsed(ViewModel.IsInstalled), Mode=OneWay}" />
-                            <Button Content="启动" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.StartCommand}"
+                            <Button Content="启动" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.SetupCommand}"
                                     Visibility="{x:Bind ShowStart(ViewModel.State), Mode=OneWay}" />
+                            <Button Content="授予权限" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.RestartElevatedCommand}"
+                                    Visibility="{x:Bind services:Ui.Visible(ViewModel.NeedsElevation), Mode=OneWay}" />
+                            <Button Content="重新启动" Command="{x:Bind ViewModel.RestartCommand}"
+                                    Visibility="{x:Bind services:Ui.Visible(ViewModel.CanRetry), Mode=OneWay}" />
                             <Button Content="停止" Command="{x:Bind ViewModel.StopCommand}"
                                     Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}" />
-                            <Button Content="提权重启" Command="{x:Bind ViewModel.RestartElevatedCommand}"
-                                    Visibility="{x:Bind services:Ui.Visible(ViewModel.NeedsElevation), Mode=OneWay}" />
                         </StackPanel>
                     </Grid>
                     <TextBlock Text="{x:Bind ViewModel.Message, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" IsTextSelectionEnabled="True"
@@ -46,61 +48,43 @@
                 </StackPanel>
             </Border>
 
-            <!-- Statistics (since the core started) -->
-            <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}">
-                <StackPanel Spacing="12">
-                    <TextBlock Text="本次运行" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <Grid ColumnSpacing="16" RowSpacing="16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-                        <StackPanel Spacing="2">
-                            <TextBlock Text="云候选请求" Style="{StaticResource SecondaryTextStyle}" />
-                            <TextBlock Text="{x:Bind ViewModel.CloudRequests, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock Text="给出候选" Style="{StaticResource SecondaryTextStyle}" />
-                            <TextBlock Text="{x:Bind ViewModel.Answered, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
-                        </StackPanel>
-                        <StackPanel Grid.Column="2" Spacing="2">
-                            <TextBlock Text="缓存命中" Style="{StaticResource SecondaryTextStyle}" />
-                            <TextBlock Text="{x:Bind ViewModel.CacheHits, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
-                        </StackPanel>
-                        <StackPanel Grid.Row="1" Spacing="2">
-                            <TextBlock Text="平均联网耗时" Style="{StaticResource SecondaryTextStyle}" />
-                            <TextBlock Text="{x:Bind ViewModel.Latency, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
-                        </StackPanel>
-                        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
-                            <TextBlock Text="核心内存" Style="{StaticResource SecondaryTextStyle}" />
-                            <TextBlock Text="{x:Bind ViewModel.Memory, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
-                        </StackPanel>
-                        <StackPanel Grid.Row="1" Grid.Column="2" Spacing="2">
-                            <TextBlock Text="最近一次查询" Style="{StaticResource SecondaryTextStyle}" />
-                            <TextBlock Text="{x:Bind ViewModel.LastQuery, Mode=OneWay}" Style="{StaticResource StatValueStyle}" TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
-                    </Grid>
-                </StackPanel>
-            </Border>
+            <!-- Only what still needs the user; everything else "一键启用" does by itself. -->
+            <InfoBar IsOpen="True" IsClosable="False" Severity="Warning" Title="没有找到微软拼音"
+                     Message="PinyinFlux 为 Windows 自带的微软拼音补充云词。请在“语言和区域 → 中文（简体）→ 语言选项”中添加“微软拼音”。"
+                     Visibility="{x:Bind services:Ui.Collapsed(ViewModel.PinyinAdded), Mode=OneWay}">
+                <InfoBar.ActionButton>
+                    <Button Content="去添加" Click="OnOpenLanguageSettings" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <InfoBar IsOpen="True" IsClosable="False" Severity="Warning" Title="微软拼音的云候选已关闭"
+                     Message="{x:Bind ViewModel.CloudSwitchOffMessage, Mode=OneWay}"
+                     Visibility="{x:Bind services:Ui.Visible(ViewModel.ShowCloudSwitchOff), Mode=OneWay}">
+                <InfoBar.ActionButton>
+                    <Button Content="打开" Command="{x:Bind ViewModel.EnableCloudCandidatesCommand}"
+                            Visibility="{x:Bind services:Ui.Visible(ViewModel.CanEnableCloudCandidates), Mode=OneWay}" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <InfoBar IsOpen="True" IsClosable="False" Severity="Warning" Title="没有启用任何云词库"
+                     Message="至少启用百度或搜狗中的一个，才会有云词。"
+                     Visibility="{x:Bind services:Ui.Collapsed(Settings.HasEnabledProvider), Mode=OneWay}">
+                <InfoBar.ActionButton>
+                    <Button Content="去启用" Click="OnOpenSources" />
+                </InfoBar.ActionButton>
+            </InfoBar>
 
             <!-- Try it -->
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="12">
                     <StackPanel Spacing="2">
                         <TextBlock Text="试一试" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                        <TextBlock Text="返回的就是微软拼音会显示的云候选。" Style="{StaticResource SecondaryTextStyle}" />
+                        <TextBlock Text="看看云词库会给出哪些词。打字时，微软拼音本地已经有的词不会重复显示。" Style="{StaticResource SecondaryTextStyle}" />
                     </StackPanel>
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBox PlaceholderText="输入拼音，例如 yyds 或 woxiangchifan" Text="{x:Bind ViewModel.TestInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        <TextBox PlaceholderText="输入拼音，例如 yyds、yuanshenqd 或 zhrmghg" Text="{x:Bind ViewModel.TestInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  KeyDown="OnTestKeyDown" />
                         <Button Grid.Column="1" Content="查询" Command="{x:Bind ViewModel.TestCommand}" />
                     </Grid>
@@ -122,19 +106,106 @@
                 </StackPanel>
             </Border>
 
-            <!-- Health -->
+            <!-- Statistics (since the core started) -->
             <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}">
                 <StackPanel Spacing="12">
-                    <TextBlock Text="运行状况" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <controls:SettingRow Header="本地证书" Description="原生注入不需要；旧代理模式用于 Bing TLS 连接。">
-                        <TextBlock Text="{x:Bind ViewModel.CertState, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
-                    </controls:SettingRow>
-                    <controls:SettingRow Header="系统代理" Description="原生注入不需要；旧代理模式才使用 PAC。">
-                        <TextBlock Text="{x:Bind ViewModel.ProxyState, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
-                    </controls:SettingRow>
-                    <controls:SettingRow Header="微软拼音原生连接" Description="显示钩子就绪数、拼音变化触发次数及重定向请求数。云候选显示与选词需实际验证。">
-                        <TextBlock Text="{x:Bind ViewModel.ImeSessions, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
-                    </controls:SettingRow>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="本次运行" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock Text="自后台启动或修改设置以来。" Style="{StaticResource SecondaryTextStyle}" />
+                    </StackPanel>
+                    <Grid ColumnSpacing="16" RowSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <StackPanel Spacing="2" ToolTipService.ToolTip="微软拼音向 PinyinFlux 请求云词的次数">
+                            <TextBlock Text="云词请求" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.CloudRequests, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="2" ToolTipService.ToolTip="云词库给出了完整匹配的词的比例">
+                            <TextBlock Text="有结果" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.Answered, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Spacing="2" ToolTipService.ToolTip="不用联网、直接用之前结果的比例">
+                            <TextBlock Text="直接用缓存" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.CacheHits, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Spacing="2" ToolTipService.ToolTip="需要联网时，从发出查询到云词库回应的平均时间">
+                            <TextBlock Text="平均联网耗时" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.Latency, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+                            <TextBlock Text="后台内存占用" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.Memory, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2" Spacing="2">
+                            <TextBlock Text="最近一次查询" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.LastQuery, Mode=OneWay}" Style="{StaticResource StatValueStyle}" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Connection details -->
+            <Border Style="{StaticResource CardStyle}" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="连接详情" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <StackPanel Spacing="12" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsNativeMode), Mode=OneWay}">
+                        <controls:SettingRow Header="已接入的输入法进程" Description="每个登录的 Windows 账户通常有 1 个。为 0 时请切换到微软拼音打几个字。">
+                            <TextBlock Text="{x:Bind ViewModel.ImeSessions, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        </controls:SettingRow>
+                        <controls:SettingRow Header="转给 PinyinFlux 的云查询" Description="微软拼音原本发往 Bing 的云查询，改由百度、搜狗回答的次数。">
+                            <TextBlock Text="{x:Bind ViewModel.NativeRequests, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        </controls:SettingRow>
+                    </StackPanel>
+                    <StackPanel Spacing="12" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsCompatibilityMode), Mode=OneWay}">
+                        <controls:SettingRow Header="本机证书" Description="兼容模式用它读取微软拼音发往 Bing 的加密请求。">
+                            <TextBlock Text="{x:Bind ViewModel.CertState, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+                        </controls:SettingRow>
+                        <controls:SettingRow Header="系统代理" Description="只有发往 Bing 的请求会经过 PinyinFlux，其余网络访问不受影响。">
+                            <TextBlock Text="{x:Bind ViewModel.ProxyState, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+                        </controls:SettingRow>
+                        <controls:SettingRow Header="经过 PinyinFlux 的微软拼音连接">
+                            <TextBlock Text="{x:Bind ViewModel.ImeSessions, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        </controls:SettingRow>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- FAQ -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="常见问题" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="云词在哪里？" Style="{StaticResource BodyTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                   Text="打完拼音停顿片刻，候选栏第 2 位出现带云朵图标的词就是云词，按 2 或点击即可上屏。第 1 位始终保留微软拼音自己的首选。" />
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="为什么很多时候没有云词？" Style="{StaticResource BodyTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                   Text="云词和本地候选重复时不显示，常用词微软拼音本地通常已有。少于 4 个字母、云词库之间意见不一或只匹配了一部分拼音时，也不会显示，以免出现错词。网络新词、人名、简拼（如 yyds）最容易出云词。" />
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="会不会拖慢打字？" Style="{StaticResource BodyTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                   Text="不会。本地候选立即显示，云词到了才插入，等待期间候选不动；最多等 0.45 秒。断网或云词库无响应时，微软拼音和没装 PinyinFlux 时一样。" />
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="会上传什么？" Style="{StaticResource BodyTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                   Text="只把正在输入的拼音发给你选择的云词库，不发送应用名称和上下文，也没有任何统计上报。" />
+                    </StackPanel>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="想恢复原样？" Style="{StaticResource BodyTextBlockStyle}" />
+                        <TextBlock Style="{StaticResource SecondaryTextStyle}"
+                                   Text="点“停止”即可暂停；在“设置 → 停用”中可撤销所有改动。卸载 PinyinFlux 也会自动还原。" />
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </StackPanel>

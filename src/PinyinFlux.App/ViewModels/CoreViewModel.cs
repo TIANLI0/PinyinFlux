@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Dispatching;
 using PinyinFlux.App.Services;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace PinyinFlux.App.ViewModels;
 
@@ -27,27 +28,30 @@ public sealed partial class CoreViewModel : ObservableObject
 
     private readonly CoreClient _core;
     private readonly Func<int> _port;
+    private readonly Func<bool> _nativeMode;
     private readonly DispatcherQueueTimer _timer;
     private bool _polling;
 
-    public CoreViewModel(CoreClient core, Func<int> port, DispatcherQueue dispatcher)
+    public CoreViewModel(CoreClient core, Func<int> port, Func<bool> nativeMode, DispatcherQueue dispatcher)
     {
         _core = core;
         _port = port;
+        _nativeMode = nativeMode;
         _timer = dispatcher.CreateTimer();
         _timer.Interval = PollInterval;
         _timer.Tick += async (_, _) => await RefreshAsync();
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Title), nameof(Summary), nameof(IsRunning), nameof(IsInstalled))]
+    [NotifyPropertyChangedFor(nameof(Title), nameof(Summary), nameof(IsRunning), nameof(IsInstalled), nameof(CanRetry), nameof(ShowCloudSwitchOff))]
     public partial CoreState State { get; set; } = CoreState.NotInstalled;
 
     [ObservableProperty]
     public partial CoreStatus? Status { get; set; }
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(InstallCommand), nameof(StartCommand), nameof(StopCommand), nameof(UninstallCommand), nameof(RestartElevatedCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SetupCommand), nameof(StopCommand), nameof(UninstallCommand), nameof(RestartElevatedCommand),
+                                nameof(RestartCommand))]
     public partial bool IsBusy { get; set; }
 
     /// <summary>Output of the last install / uninstall, shown under the buttons.</summary>
@@ -56,6 +60,32 @@ public sealed partial class CoreViewModel : ObservableObject
 
     [ObservableProperty]
     public partial string TestInput { get; set; } = "";
+
+    /// <summary>Progress or failure of a connection mode switch, shown under the mode in settings.</summary>
+    [ObservableProperty]
+    public partial string ModeMessage { get; set; } = "";
+
+    /// <summary>Feedback of "复制诊断信息".</summary>
+    [ObservableProperty]
+    public partial string DiagnosticsMessage { get; set; } = "";
+
+    /// <summary>Microsoft Pinyin is one of the user's input methods; re-read on every poll.</summary>
+    [ObservableProperty]
+    public partial bool PinyinAdded { get; set; } = true;
+
+    /// <summary>Microsoft Pinyin's own cloud candidate switch is on; re-read on every poll.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowCloudSwitchOff))]
+    public partial bool PinyinCloudEnabled { get; set; } = true;
+
+    /// <summary>Set up once, but the switch was turned off afterwards (before setup, one click turns it on anyway).</summary>
+    public bool ShowCloudSwitchOff => !PinyinCloudEnabled && IsInstalled;
+
+    public bool CanEnableCloudCandidates => !MicrosoftPinyin.CloudCandidatesBlocked;
+
+    public string CloudSwitchOffMessage => MicrosoftPinyin.CloudCandidatesBlocked
+        ? "云词显示在云候选的位置，但它已被单位的管理员策略关闭，无法在这里打开。"
+        : "云词显示在微软拼音云候选的位置，关闭后不会出现。";
 
     public ObservableCollection<string> TestResults { get; } = [];
 
@@ -69,20 +99,38 @@ public sealed partial class CoreViewModel : ObservableObject
     public bool CoreExists => CoreClient.CoreExists;
     public bool NeedsElevation => Status is { NativeMode: true, NativeDenied: > 0 };
 
+    /// <summary>Running but not working, and starting over may help (as opposed to granting rights).</summary>
+    public bool CanRetry => State == CoreState.Degraded && !NeedsElevation;
+
+    public bool IsNativeMode => Status?.NativeMode == true;
+
+    public bool IsCompatibilityMode => Status is { NativeMode: false };
+
     public string Title => State switch
     {
-        CoreState.Running => Status?.NativeMode == true ? "原生云候选钩子已就绪" : "云词库代理运行中",
-        CoreState.Degraded => Status?.NativeMode == true ? "核心运行中，原生注入未就绪" : "正在运行，但代理设置被占用",
+        CoreState.Running => IsNativeMode ? "正在工作" : "正在工作（兼容模式）",
+        CoreState.Degraded => !IsNativeMode ? "系统代理被其他程序占用"
+            : Status!.NativeUnsupported > 0 ? "暂不支持这个 Windows 版本"
+            : Status.NativeDenied > 0 ? "需要管理员权限"
+            : Status.NativeErrors > 0 ? "接入微软拼音失败"
+            : "等待微软拼音",
         CoreState.Stopped => "已停止",
-        _ => "尚未安装",
+        _ => "尚未启用",
     };
 
     public string Summary => State switch
     {
-        CoreState.Running => Status?.NativeMode == true ? "已安装原生候选与网络钩子；请实际输入拼音确认云候选显示与选词。" : "替换微软拼音主动发出的云请求，触发频率仍由微软拼音决定。",
-        CoreState.Degraded => NativeProblem,
-        CoreState.Stopped => "微软拼音的云候选回到 Bing。",
-        _ => "默认启用原生注入实验模式，主动请求云候选；不创建证书或改写系统代理。",
+        CoreState.Running => IsNativeMode
+            ? "用微软拼音打字时，停顿片刻，本地没有的词会出现在候选栏第 2 位，带云朵图标。"
+            : "微软拼音向 Bing 查询云候选时，PinyinFlux 会换成百度、搜狗的结果；查询时机由微软拼音决定。",
+        CoreState.Degraded => !IsNativeMode
+            ? "其他代理软件改写了系统代理，微软拼音的云请求没有经过 PinyinFlux。关闭那个软件后点“重新启动”，或在设置中改用“直接接入”。"
+            : Status!.NativeUnsupported > 0 ? "没能确认本机微软拼音的内部结构，为安全起见没有接入，输入法照常可用。首次使用需要联网从微软下载约 10 MB 的公开调试信息，联网后点“重新启动”；仍不行请到 GitHub 反馈。"
+            : Status.NativeDenied > 0 ? "Windows 不允许 PinyinFlux 接入输入法。点“授予权限”，在弹出的窗口中选“是”。只需一次，以后开机会自动以该权限启动。"
+            : Status.NativeErrors > 0 ? $"接入输入法时出错（Windows 错误 {Status.NativeLastError}）。点“重新启动”再试；仍不行请在“设置 → 诊断”中复制诊断信息并反馈。"
+            : "切换到微软拼音并打几个字，PinyinFlux 就会接入。",
+        CoreState.Stopped => "微软拼音照常可用，只是不会出现百度、搜狗的云词。",
+        _ => "点“一键启用”即可：自动打开微软拼音的云候选、设为开机启动并在后台运行，Windows 询问权限时选“是”。不安装证书，不改动系统代理。",
     };
 
     public string CloudRequests => Format(Status?.CloudRequests);
@@ -92,21 +140,17 @@ public sealed partial class CoreViewModel : ObservableObject
     public string Memory => Status is { WorkingSetKB: > 0 } s ? $"{s.WorkingSetKB / 1024.0:0.0} MB" : "—";
     public string LastQuery => string.IsNullOrEmpty(Status?.LastQuery) ? "—" : Status.LastQuery;
     public string Version => Status?.Version is { Length: > 0 } v ? v : "—";
-    private string NativeProblem => Status?.NativeMode != true
-        ? "系统代理未指向 PinyinFlux。"
-        : Status.NativeUnsupported > 0 ? "无法确认当前微软拼音版本的挂钩地址（可能需要联网下载微软公开符号），已停止打补丁。"
-        : Status.NativeDenied > 0 ? "Windows 拒绝访问输入法宿主（错误 5）。点击“提权重启”并在 UAC 中确认。"
-        : Status.NativeErrors > 0 ? $"注入失败，Windows 错误 {Status.NativeLastError}。查看 core.log 获取详情。"
-        : "等待输入法宿主加载候选与云词库模块。请切换至微软拼音并输入拼音。";
-    public string CertState => Status is null ? "—" : Status.NativeMode ? "注入模式不需要" : Status.CertTrusted ? "已信任" : "未信任";
-    public string ProxyState => Status is null ? "—" : Status.NativeMode ? "注入模式不需要" : Status.ProxyApplied ? "已接管（仅 Bing）" : "未接管";
-    public string ImeSessions => Status?.NativeMode == true ? $"{Status.NativeReady} 个就绪 / {Status.NativeTriggers} 次触发 / {Status.NativeRequests} 次请求" : Format(Status?.ImeSessions);
+    public string CertState => Status is null ? "—" : Status.CertTrusted ? "已信任" : "未信任";
+    public string ProxyState => Status is null ? "—" : Status.ProxyApplied ? "已指向 PinyinFlux（仅 Bing 的请求）" : "未指向 PinyinFlux";
+    public string ImeSessions => Status?.NativeMode == true ? Format(Status.NativeReady) : Format(Status?.ImeSessions);
+    public string NativeRequests => Format(Status?.NativeRequests);
 
     partial void OnStatusChanged(CoreStatus? value)
     {
-        foreach (string name in new[] { nameof(CloudRequests), nameof(Answered), nameof(CacheHits), nameof(Latency), nameof(Memory),
+        foreach (string name in new[] { nameof(CloudSwitchOffMessage), nameof(CanEnableCloudCandidates), nameof(CloudRequests), nameof(Answered), nameof(CacheHits), nameof(Latency), nameof(Memory),
                                         nameof(LastQuery), nameof(Version), nameof(CertState), nameof(ProxyState), nameof(ImeSessions),
-                                        nameof(NeedsElevation), nameof(Title), nameof(Summary) })
+                                        nameof(NativeRequests), nameof(NeedsElevation), nameof(CanRetry), nameof(IsNativeMode),
+                                        nameof(IsCompatibilityMode), nameof(Title), nameof(Summary) })
         {
             OnPropertyChanged(name);
         }
@@ -128,6 +172,8 @@ public sealed partial class CoreViewModel : ObservableObject
 
     public async Task RefreshAsync()
     {
+        PinyinAdded = MicrosoftPinyin.IsAdded;
+        PinyinCloudEnabled = MicrosoftPinyin.CloudCandidatesEnabled;
         var status = await _core.GetStatusAsync(_port());
         Status = status;
         State = status is null
@@ -135,38 +181,59 @@ public sealed partial class CoreViewModel : ObservableObject
             : (status.NativeMode ? status.NativeReady > 0 : status.ProxyApplied) ? CoreState.Running : CoreState.Degraded;
     }
 
+    /// <summary>
+    /// "一键启用" / "启动": everything that can be done for the user. Turns Microsoft Pinyin's cloud candidates on, starts
+    /// the core (the first time with --install, which also enables autostart) and, when Windows refuses the injection for
+    /// lack of rights, goes straight on to the UAC prompt. Confirming it once also registers the elevated start task, so
+    /// later starts need no prompt.
+    /// </summary>
     [RelayCommand(CanExecute = nameof(CanRunVerb))]
-    private async Task InstallAsync()
+    private async Task SetupAsync()
     {
         IsBusy = true;
-        Message = "正在启用核心…";
         try
         {
-            var (code, output) = await CoreClient.RunVerbAsync("--install");
-            Message = code == 0 ? "" : output;
-            await Task.Delay(500);  // let the core bind its port
-            await RefreshAsync();
+            if (!MicrosoftPinyin.CloudCandidatesEnabled && !MicrosoftPinyin.CloudCandidatesBlocked) MicrosoftPinyin.EnableCloudCandidates();
+            if (await _core.GetStatusAsync(_port()) is null)
+            {
+                Message = "正在启动…";
+                string error;
+                if (State == CoreState.NotInstalled)
+                {
+                    var (code, output) = await CoreClient.RunVerbAsync("--install");
+                    error = code == 0 ? "" : output;
+                }
+                else
+                {
+                    error = await StartCoreAsync();
+                }
+                if (error.Length > 0)
+                {
+                    Message = error;
+                    return;
+                }
+            }
+            // The core tries the input host right away; give it a few seconds to report success or refusal.
+            for (int i = 0; i < 12; i++)
+            {
+                await Task.Delay(500);
+                await RefreshAsync();
+                if (Status is { NativeMode: false } or { NativeReady: > 0 } or { NativeUnsupported: > 0 } || NeedsElevation) break;
+            }
+            Message = "";
         }
         finally
         {
             IsBusy = false;
         }
+        if (NeedsElevation) await RestartElevatedAsync();
     }
 
-    [RelayCommand(CanExecute = nameof(CanRunVerb))]
-    private async Task StartAsync()
+    [RelayCommand]
+    private async Task EnableCloudCandidatesAsync()
     {
-        IsBusy = true;
-        try
-        {
-            CoreClient.Start();
-            await Task.Delay(500);
-            await RefreshAsync();
-        }
-        finally
-        {
-            IsBusy = false;
-        }
+        MicrosoftPinyin.EnableCloudCandidates();
+        await RefreshAsync();
     }
 
     [RelayCommand(CanExecute = nameof(CanRunVerb))]
@@ -204,6 +271,87 @@ public sealed partial class CoreViewModel : ObservableObject
     private bool CanRunVerb() => !IsBusy && CoreClient.CoreExists;
 
     [RelayCommand(CanExecute = nameof(CanRunVerb))]
+    private async Task RestartAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            await CoreClient.RunVerbAsync("--stop");
+            Message = await StartCoreAsync();
+            await Task.Delay(800);
+            await RefreshAsync();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// The connection mode was changed in settings. A running core exits by itself when it sees the change;
+    /// start it again in the new mode (proxy mode first creates and trusts its certificate).
+    /// </summary>
+    public async Task ApplyModeChangeAsync(bool native)
+    {
+        if (IsBusy) return;
+        if (!IsRunning)
+        {
+            ModeMessage = State == CoreState.NotInstalled ? "" : "已保存，下次启动时生效。";
+            return;
+        }
+        IsBusy = true;
+        ModeMessage = native ? "正在切换到直接接入…" : "正在切换到兼容模式，Windows 可能会询问是否安装 PinyinFlux 证书…";
+        try
+        {
+            for (int i = 0; i < 20 && await _core.GetStatusAsync(_port()) is not null; i++) await Task.Delay(250);
+            ModeMessage = await StartCoreAsync();
+            await Task.Delay(800);
+            await RefreshAsync();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Starts the core in the configured mode. Proxy mode needs its certificate trusted first, which only --install does;
+    /// --install also turns autostart on, so the user's choice is put back. Returns the core's output on failure.
+    /// </summary>
+    private async Task<string> StartCoreAsync()
+    {
+        if (_nativeMode())
+        {
+            CoreClient.Start();
+            return "";
+        }
+        bool autostart = CoreClient.StartsWithWindows;
+        var (code, output) = await CoreClient.RunVerbAsync("--install");
+        CoreClient.StartsWithWindows = autostart;
+        return code == 0 ? "" : output;
+    }
+
+    /// <summary>Puts what a bug report needs on the clipboard: versions, Microsoft Pinyin setup and the core's full status.</summary>
+    [RelayCommand]
+    private async Task CopyDiagnosticsAsync()
+    {
+        string status = await _core.GetRawStatusAsync(_port()) ?? "(core not running)";
+        string text = $"{Views.AboutPage.SystemInfoText}\nMicrosoft Pinyin: {(MicrosoftPinyin.IsAdded ? "added" : "not added")}, "
+            + $"cloud candidates {(MicrosoftPinyin.CloudCandidatesEnabled ? "on" : "off")}\nStatus: {status}";
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(text);
+            Clipboard.SetContent(package);
+            DiagnosticsMessage = "已复制。反馈问题时粘贴到 GitHub Issue 中即可；其中包含最近一次查询的拼音。";
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            DiagnosticsMessage = "剪贴板被其他程序占用，请稍后再试。";
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRunVerb))]
     private async Task RestartElevatedAsync()
     {
         IsBusy = true;
@@ -211,14 +359,14 @@ public sealed partial class CoreViewModel : ObservableObject
         {
             var (code, output) = await CoreClient.RunVerbAsync("--stop");
             if (code != 0) { Message = output; return; }
-            Message = "请在 UAC 弹窗中确认管理员权限。";
+            Message = "请在 Windows 弹出的窗口中选“是”。";
             CoreClient.StartElevated();
             await Task.Delay(700);
             Message = "";
         }
         catch (Win32Exception ex)
         {
-            Message = ex.NativeErrorCode == 1223 ? "已取消提权；可重新点击启动。" : $"提权启动失败：{ex.Message}";
+            Message = ex.NativeErrorCode == 1223 ? "已取消。需要时可再次点击“授予权限”。" : $"未能以管理员权限启动：{ex.Message}";
         }
         finally
         {
@@ -235,7 +383,7 @@ public sealed partial class CoreViewModel : ObservableObject
         if (input.Length == 0) return;
         if (!IsRunning)
         {
-            TestMessage = "PinyinFlux 未运行。";
+            TestMessage = "PinyinFlux 未运行，请先启动。";
             return;
         }
         var words = await _core.QueryAsync(_port(), input);
@@ -245,7 +393,7 @@ public sealed partial class CoreViewModel : ObservableObject
             return;
         }
         foreach (string w in words) TestResults.Add(w);
-        TestMessage = words.Count == 0 ? "云词库没有完整匹配的候选。" : "";
+        TestMessage = words.Count == 0 ? "云词库没有给出完整匹配这串拼音的词。" : "";
         await RefreshAsync();
     }
 

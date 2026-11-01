@@ -71,6 +71,7 @@ constexpr GUID kCandidateInfo = {0xc4445657, 0x6908, 0x45eb, {0xa6, 0xb9, 0x2f, 
 // placeholder as a blank. Compare against the local list before adding one.
 std::mutex wordsMutex;
 std::vector<std::wstring> localWords, responseWords;
+ULONGLONG compositionStart = 0;  // first keystroke of the word being typed; engine thread only
 
 bool Swap(void** slot, void* before, void* after) {
   DWORD protection = 0;
@@ -254,6 +255,7 @@ HRESULT WINAPI SetCloudExcerpts(void* self, void* excerpts) {
 thread_local bool regenerating = false;
 bool replayed = false;  // engine notification thread only
 HRESULT WINAPI PinyinChanged(void* self, DWORD flags) {
+  if ((flags & 0x8) && !regenerating && !compositionStart) compositionStart = GetTickCount64();  // a keystroke
   if (flags & 0x1000) {
     InterlockedIncrement(&channel->diagnostics[32]);
     InterlockedExchange(&channel->diagnostics[34], cloudWords.load());
@@ -439,6 +441,64 @@ BOOL WINAPI Close(HINTERNET handle) {
   return result;
 }
 
+// Typing statistics. SetPrevPrimitive receives each committed conversion and
+// its reading, as context for next-word prediction; it declines (S_FALSE)
+// where Microsoft Pinyin keeps no history, and so do we. Only counts leave
+// this function. Engine thread only.
+using CommitText = HRESULT (WINAPI*)(void*, const NativeStringView*, const NativeStringView*);
+CommitText commitText = nullptr;
+ULONGLONG lastCommit = 0;
+constexpr ULONGLONG kTypingPause = 30000;  // a longer gap between words is a break, not typing
+struct Committed { wchar_t text[64]; size_t length; LONG chars, letters; };
+bool Han(wchar_t c) { return (c >= 0x3400 && c <= 0x9fff) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xd840 && c <= 0xd87f); }
+bool ReadCommitted(const NativeStringView* text, const NativeStringView* reading, Committed& out) {
+  __try {
+    out.length = text->size; out.chars = 0; out.letters = 0;
+    if (out.length == 0 || out.length > 256) return false;
+    const wchar_t* t = text->Text();
+    for (size_t i = 0; i < out.length; ++i) {
+      if (i < ARRAYSIZE(out.text)) out.text[i] = t[i];
+      if (Han(t[i])) ++out.chars;  // a supplementary character counts once, by its high surrogate
+    }
+    if (reading && reading->size <= 256) {
+      const wchar_t* r = reading->Text();
+      for (size_t i = 0; i < reading->size; ++i) out.letters += (r[i] >= L'a' && r[i] <= L'z') || (r[i] >= L'A' && r[i] <= L'Z');
+    }
+    return true;
+  } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+void CountCommit(const Committed& c) {
+  ULONGLONG now = GetTickCount64();
+  ULONGLONG gap = lastCommit ? now - lastCommit : kTypingPause + 1;
+  // After a break, count from the first keystroke of this word instead.
+  if (gap > kTypingPause) gap = compositionStart && now - compositionStart <= kTypingPause ? now - compositionStart : 0;
+  lastCommit = now; compositionStart = 0;
+  // A cloud word is one the placeholder actually showed for this spelling: from
+  // our response and not among the local candidates (those the native filter drops).
+  bool cloud = false;
+  {
+    std::wstring_view word(c.text, c.length <= ARRAYSIZE(c.text) ? c.length : 0);
+    std::lock_guard lock(wordsMutex);
+    cloud = replayed && !word.empty() &&
+        std::find(responseWords.begin(), responseWords.end(), word) != responseWords.end() &&
+        std::find(localWords.begin(), localWords.end(), word) == localWords.end();
+    responseWords.clear();  // answered this spelling; never match a later word
+  }
+  InterlockedIncrement(&channel->statCommits);
+  InterlockedExchangeAdd(&channel->statChars, c.chars);
+  InterlockedExchangeAdd(&channel->statLetters, c.letters);
+  InterlockedExchangeAdd(&channel->statActiveMs, static_cast<LONG>(gap));
+  if (cloud) InterlockedIncrement(&channel->statCloud);
+}
+HRESULT WINAPI CommitTextHook(void* self, const NativeStringView* text, const NativeStringView* reading) {
+  HRESULT hr = commitText(self, text, reading);
+  Committed c;
+  if (hr == S_OK && live.load() && Enabled(channel) && InterlockedCompareExchange(&channel->statsEnabled, 0, 0) &&
+      ReadCommitted(text, reading, c) && c.chars > 0)
+    CountCommit(c);
+  return hr;
+}
+
 // ChsProxyDS waits until typing has paused (polling every 10 ms) before it
 // sends a request. A replayed query repeats a spelling the user already
 // paused on: take the same single-request lock and send right away.
@@ -508,6 +568,8 @@ bool InstallTrigger(HMODULE module, bool isModern) {
     Hook(base, e.filterSuggestions, reinterpret_cast<void*>(FilterSuggestions), reinterpret_cast<void**>(&filterCallback));
     Hook(base, e.spellQuery, reinterpret_cast<void*>(SpellQuery), reinterpret_cast<void**>(&spellQuery));
     Hook(base, e.displayOrder, reinterpret_cast<void*>(CloudDisplayOrder), reinterpret_cast<void**>(&cloudDisplayOrder));
+    // Typing statistics; the core enables counting.
+    Hook(base, e.commitText, reinterpret_cast<void*>(CommitTextHook), reinterpret_cast<void**>(&commitText));
   }
   auto* head = Headers(module);
   auto* sections = IMAGE_FIRST_SECTION(head);

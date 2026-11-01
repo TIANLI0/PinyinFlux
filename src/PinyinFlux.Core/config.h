@@ -16,6 +16,7 @@ struct Config {
   bool imeOnly = true;      // only terminate TLS for ChsIME.exe connections
   bool logToFile = false;
   bool reclaimProxy = true; // re-apply the PAC if another tool overwrites it
+  bool typingStats = true;  // count committed characters (native mode); never the text
   std::string sogouUrl =
       "http://shouji.sogou.com/web_ime/mobile.php?durtot=0&h=000000000000000&r=store_mf_wandoujia&v=3.7";
   std::string sogouIp;      // optional: connect to this IP instead of resolving the host

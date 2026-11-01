@@ -42,6 +42,7 @@ std::shared_ptr<const Config> LoadConfig() {
   c->imeOnly = ReadInt(L"Core", L"ImeOnly", d.imeOnly, 0, 1) != 0;
   c->logToFile = ReadInt(L"Core", L"Log", d.logToFile, 0, 1) != 0;
   c->reclaimProxy = ReadInt(L"Core", L"ReclaimProxy", d.reclaimProxy, 0, 1) != 0;
+  c->typingStats = ReadInt(L"Core", L"TypingStats", d.typingStats, 0, 1) != 0;
 
   std::string providers = ReadString(L"Core", L"Providers", "");
   if (!providers.empty()) {
@@ -63,6 +64,7 @@ void SaveConfig(const Config& c) {
   WriteInt(L"Core", L"ImeOnly", c.imeOnly ? 1 : 0);
   WriteInt(L"Core", L"Log", c.logToFile ? 1 : 0);
   WriteInt(L"Core", L"ReclaimProxy", c.reclaimProxy ? 1 : 0);
+  WriteInt(L"Core", L"TypingStats", c.typingStats ? 1 : 0);
   std::string providers;
   for (const auto& p : c.providers) {
     if (!providers.empty()) providers += ',';

@@ -57,7 +57,7 @@ cmake --build out/core/Release --target PinyinFluxImeTest
 .\out\core\Release\PinyinFluxCore.exe --stop
 ```
 
-注入输入法宿主需要管理员权限。配置位于 `%LOCALAPPDATA%\PinyinFlux\config.ini`，`[Core] NativeInjection=1` 为原生模式，`0` 为旧代理模式；切换模式需要重启核心。
+注入输入法宿主需要管理员权限。配置位于 `%LOCALAPPDATA%\PinyinFlux\config.ini`，`[Core] NativeInjection=1` 为原生模式，`0` 为兼容模式（PAC 代理 + 本机证书）；核心发现模式变化会自行退出，设置界面随后以新模式重新启动它。
 
 `http://127.0.0.1:18765/qsonhs.aspx?q=<拼音>` 返回微软拼音会收到的响应，`/status` 字段：
 
@@ -71,6 +71,9 @@ cmake --build out/core/Release --target PinyinFluxImeTest
 | `nativeArrivals` / `nativeReplays` | 微软收到的云结果 / 因有可显示的新词而重放占位 |
 | `nativeDebounceSkips` | 重放查询跳过输入停顿等待的次数 |
 | `queries` / `answered` / `cacheHits` / `backfills` | 引擎查询 / 有结果 / 命中缓存 / 迟到结果回填 |
+| `typingEnabled` / `typing` | 打字统计开关 / 当天的上屏次数、汉字数、拼音字母数、云词次数、打字秒数（含尚未写入 `stats.csv` 的部分） |
+
+打字统计由扩展挂钩 `ChxIME::ProductItemPool::SetPrevPrimitive`（微软拼音每次上屏时以上屏文字和读音调用，用作联想上下文；不记录输入历史的场合返回 `S_FALSE`，此时不计数）。扩展只在共享内存中累加计数，核心汇总各宿主的增量，每分钟把当天一行写入 `%LOCALAPPDATA%\PinyinFlux\stats.csv`（`date,commits,chars,letters,cloud,activeSeconds`），设置界面读该文件显示历史。清除统计通过命名事件 `Local\PinyinFlux.ClearTyping` 通知核心。
 
 停止核心会恢复所有内存钩子。为避免正在执行的回调访问已卸载的代码，扩展 DLL 会以停用状态留在宿主中，直到输入法进程退出；升级时 DLL 复制到按内容哈希命名的目录，不会覆盖已加载的文件。
 

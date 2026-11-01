@@ -55,6 +55,11 @@
                         <FontIcon Glyph="&#xE753;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="打字统计" Tag="Stats">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE765;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
                 <NavigationViewItem Content="关于" Tag="About">

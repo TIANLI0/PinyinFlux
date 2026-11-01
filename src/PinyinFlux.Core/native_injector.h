@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include "typing_stats.h"
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -12,6 +13,7 @@ class NativeInjector {
   void Stop();
   void SetPort(int port) { port_ = port; }
   std::string StatusJson() const;
+  void ClearTypingStats() { typing_.Clear(); }
  private:
   static DWORD WINAPI Thread(void* self);
   void Run();
@@ -24,5 +26,6 @@ class NativeInjector {
   std::atomic<LONG> diagnostics_[36]{};
   mutable std::mutex layoutMutex_;
   std::string layoutSummary_ = "resolving";
+  mutable TypingStats typing_;
 };
 }  // namespace pf

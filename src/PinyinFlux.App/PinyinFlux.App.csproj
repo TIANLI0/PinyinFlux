@@ -25,6 +25,8 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <DefaultLanguage>zh-CN</DefaultLanguage>
+    <!-- Program.cs keeps the settings window single-instance. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <!-- Source-generated P/Invoke (LibraryImport). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>

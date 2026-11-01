@@ -227,6 +227,7 @@ int Run(bool console, bool dev, int devPort = 18766) {
   g_exitEvent = CreateEventW(nullptr, TRUE, FALSE, exitName.c_str());
   HANDLE reloadEvent = CreateEventW(nullptr, FALSE, FALSE, kReloadEventName);
   HANDLE regEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  HANDLE clearTypingEvent = CreateEventW(nullptr, FALSE, FALSE, dev ? nullptr : kClearTypingEventName);
   if (console) SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
 
   ProxyServer server;
@@ -270,7 +271,7 @@ int Run(bool console, bool dev, int devPort = 18766) {
   };
   trimIfIdle();
 
-  HANDLE waits[] = {g_exitEvent, reloadEvent, regEvent};
+  HANDLE waits[] = {g_exitEvent, reloadEvent, regEvent, clearTypingEvent};
   while (true) {
     DWORD r = WaitForMultipleObjects(ARRAYSIZE(waits), waits, FALSE, kTrimCheckMs);
     if (r == WAIT_TIMEOUT) {
@@ -278,6 +279,11 @@ int Run(bool console, bool dev, int devPort = 18766) {
       continue;
     }
     if (r == WAIT_OBJECT_0) break;
+    if (r == WAIT_OBJECT_0 + 3) {
+      injector.ClearTypingStats();
+      Log("typing statistics cleared");
+      continue;
+    }
 
     if (r == WAIT_OBJECT_0 + 1 && !dev) {
       auto next = LoadConfig();

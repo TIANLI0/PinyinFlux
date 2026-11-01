@@ -33,7 +33,7 @@
                             <TextBlock Text="{x:Bind AppVersion}" VerticalAlignment="Bottom" Margin="0,0,0,3" Style="{StaticResource SecondaryTextStyle}" />
                         </StackPanel>
                         <TextBlock TextWrapping="Wrap" Style="{StaticResource SecondaryTextStyle}"
-                                   Text="让微软拼音用上国内云词库。原生注入实验模式在内存中扩展候选流程，保留微软原生候选框，不修改系统文件。" />
+                                   Text="让微软拼音用上百度、搜狗的云词库。云词直接出现在微软拼音自己的候选栏里，不换输入法，不修改系统文件。" />
                         <controls:WrapPanel Style="{StaticResource LinkRowStyle}" Margin="0,2,0,0">
                             <HyperlinkButton Content="源代码" NavigateUri="https://github.com/TIANLI0/PinyinFlux" />
                             <HyperlinkButton Content="更新日志" NavigateUri="https://github.com/TIANLI0/PinyinFlux/releases" />
@@ -47,9 +47,9 @@
                 <StackPanel Spacing="12">
                     <TextBlock Text="工作原理" Style="{StaticResource BodyStrongTextBlockStyle}" />
                     <TextBlock TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}">
-                        <Run Text="原生注入模式监听微软拼音内部的拼音变化通知，触发其原生云查询，再将 ChsProxyDS 的云请求重定向到本地核心，由核心查询百度、搜狗并返回 Bing 格式候选。候选显示、排序和选词仍由微软拼音完成。此模式依赖具体 Windows 版本与注入权限，钩子就绪不等于已验证选词上屏。" />
+                        <Run Text="微软拼音本来就有“云候选”：输入时向 Bing 查询，把结果放在候选栏第 2 位。PinyinFlux 在后台运行一个小程序，接入微软拼音的这一流程，让它在你停顿时主动查询，并把查询交给百度、搜狗回答。候选的显示、选词和自学习仍由微软拼音完成。" />
                         <LineBreak /><LineBreak />
-                        <Run Text="关闭原生注入可使用旧代理模式，但该模式无法强制微软拼音联网。停止核心会恢复内存钩子；注入 DLL 保留为停用状态，直到输入法进程退出。设置窗口关闭后不常驻。" />
+                        <Run Text="接入所需的内部地址按本机 Windows 版本从微软公开的调试信息中读取，读不准就不接入，输入法保持原样。“兼容模式”则不接入输入法，而是通过本机代理替换微软拼音发往 Bing 的请求，云词出现得较少，仅作备选。停止后接入会立即撤销；这个设置窗口关闭后不会常驻。" />
                     </TextBlock>
                 </StackPanel>
             </Border>
