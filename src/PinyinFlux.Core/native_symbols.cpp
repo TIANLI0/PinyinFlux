@@ -209,20 +209,34 @@ bool EngineFields(SymbolImage& image, native::EngineLayout& e) {
     }
   }
 
-  // OnProductItemChanged (pinyin handler interface): lea r14, [rcx - base],
-  // then the spelling lookup: mov rcx, [rsi + pool]; ...; mov edx, 8; mov rax, [rax + slot].
+  // OnProductItemChanged (pinyin handler interface) keeps `this` in a register
+  // (mov rsi, rcx; on some 22621 builds mov r14, rcx) and derives the rule
+  // object from it or from rcx: lea r64, [this - base]. Then the spelling
+  // lookup: mov rcx, [this + pool]; ...; mov edx, 8; mov rax, [rax + slot].
   Code changed = Body(image, e.pinyinChanged.rva, 0x200);
+  int self = -1;  // register number
+  for (size_t i = 0; changed.begin && i + 3 <= changed.size && self < 0; ++i) {
+    const BYTE* p = changed.begin + i;
+    if ((p[0] == 0x48 || p[0] == 0x4c) && p[1] == 0x8b && (p[2] & 0xc7) == 0xc1) self = ((p[0] & 4) << 1) | ((p[2] >> 3) & 7);
+  }
+  // lea r64, [reg + disp32]
+  auto leaFrom = [](const BYTE* p, int reg) {
+    return (p[0] & 0xfa) == 0x48 && p[1] == 0x8d && (p[2] & 0xc0) == 0x80 && (p[2] & 7) != 4 && (((p[0] & 1) << 3) | (p[2] & 7)) == reg;
+  };
   int32_t base = 0;
-  for (size_t i = 0; changed.begin && i + 7 <= changed.size && !base; ++i)
-    if (LeaRcx(changed.begin + i) && Disp32(changed.begin + i + 3) < 0 && Disp32(changed.begin + i + 3) > -0x1000)
-      base = -Disp32(changed.begin + i + 3);
+  for (size_t i = 0; self >= 0 && changed.begin && i + 7 <= changed.size && !base; ++i) {
+    const BYTE* p = changed.begin + i;
+    if ((leaFrom(p, 1) || leaFrom(p, self)) && Disp32(p + 3) < 0 && Disp32(p + 3) > -0x1000) base = -Disp32(p + 3);
+  }
+  // Builds compiled with XFG (Windows 11 22H2/23H2) load the call's type hash
+  // in between (movabs r10, imm64), which puts the pool load 27 bytes back.
   Code spelling = Body(image, e.pinyinChanged.rva, 0x1000);
-  for (size_t i = 20; base && spelling.begin && i + 9 <= spelling.size && !e.poolSpelling; ++i) {
+  for (size_t i = 32; base && (self & 7) != 4 && spelling.begin && i + 9 <= spelling.size && !e.poolSpelling; ++i) {
     const BYTE* p = spelling.begin + i;
     if (p[0] != 0xba || Disp32(p + 1) != 8 || p[5] != 0x48 || p[6] != 0x8b || p[7] != 0x40) continue;
-    for (size_t back = 4; back <= 20; ++back) {
+    for (size_t back = 4; back <= 32; ++back) {
       const BYTE* q = p - back;
-      if (q[0] == 0x48 && q[1] == 0x8b && q[2] == 0x4e) {
+      if (q[0] == (0x48 | (self >> 3)) && q[1] == 0x8b && q[2] == (0x48 | (self & 7))) {
         e.rulePool = static_cast<DWORD>(base + q[3]);
         e.poolSpelling = p[8];
         break;
@@ -230,11 +244,13 @@ bool EngineFields(SymbolImage& image, native::EngineLayout& e) {
     }
   }
 
-  // ChsIME cloud handler interface: lea rax, [rdi - base]; ...; neg rax (null-checked cast).
+  // ChsIME cloud handler interface: lea rax, [this - base]; ...; neg rax (null-checked cast).
+  // `this` is rdi on 26100 and rsi on 22621; any base register but rsp (which needs a SIB byte).
   Code cloud = Body(image, e.cloudChanged.rva, 0x300);
   for (size_t i = 0; cloud.begin && i + 18 <= cloud.size && !e.cloudBase; ++i) {
     const BYTE* p = cloud.begin + i;
-    if (p[0] != 0x48 || p[1] != 0x8d || p[2] != 0x87 || Disp32(p + 3) >= 0 || Disp32(p + 3) <= -0x1000) continue;
+    if (p[0] != 0x48 || p[1] != 0x8d || (p[2] & 0xf8) != 0x80 || (p[2] & 7) == 4 || Disp32(p + 3) >= 0 ||
+        Disp32(p + 3) <= -0x1000) continue;
     for (size_t gap = 7; gap <= 15; ++gap)
       if (p[gap] == 0x48 && p[gap + 1] == 0xf7 && p[gap + 2] == 0xd8) e.cloudBase = static_cast<DWORD>(-Disp32(p + 3));
   }
@@ -294,14 +310,15 @@ native::ImageId ImageOnDisk(const std::wstring& path) {
   return {nt->FileHeader.TimeDateStamp, nt->OptionalHeader.SizeOfImage};
 }
 
-std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* report) {
+std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* report, const std::wstring& images) {
   LayoutReport ignored;
   if (!report) report = &ignored;
   *report = {};
   layout = {};
   wchar_t buffer[MAX_PATH]{};
   GetSystemDirectoryW(buffer, MAX_PATH);
-  const std::wstring system = buffer;
+  const std::wstring system = images.empty() ? std::wstring(buffer) : images;
+  const std::wstring chs = images.empty() ? system + L"\\InputMethod\\CHS" : images;
   std::string summary;
 
   SymbolImage engine;
@@ -335,7 +352,7 @@ std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* repo
   }
 
   SymbolImage proxy;
-  if (proxy.Open(system + L"\\InputMethod\\CHS\\ChsProxyDS.dll")) {
+  if (proxy.Open(chs + L"\\ChsProxyDS.dll")) {
     auto& p = layout.proxy;
     p.image = proxy.Id();
     proxy.Fill(p.getCandidates, "ChsQueryHandler::GetCandidates");
@@ -367,7 +384,7 @@ std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* repo
   }
 
   SymbolImage legacy;
-  if (legacy.Open(system + L"\\InputMethod\\CHS\\ChsEM.dll")) {
+  if (legacy.Open(chs + L"\\ChsEM.dll")) {
     layout.legacy.image = legacy.Id();
     // Hosts without InputService (older Windows) use this one.
     if (legacy.Fill(layout.legacy.cloudChanged, "ChxIME::CandidateHandlerConversionOfCloud::OnProductItemChanged") &&

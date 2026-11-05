@@ -22,10 +22,10 @@
 ; %LOCALAPPDATA%\PinyinFlux are deleted only if the user agrees.
 
 #ifndef AppVersion
-  #define AppVersion "0.3.0"
+  #define AppVersion "0.3.1"
 #endif
 #ifndef AppVersionNumeric
-  #define AppVersionNumeric "0.3.0.0"
+  #define AppVersionNumeric "0.3.1.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\artifacts\PinyinFlux-win-x64"

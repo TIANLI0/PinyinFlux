@@ -94,6 +94,17 @@ cmake --build out/core/Release --target PinyinFluxImeTest
 2. 用 `dumpbin /disasm /range:<起始>,<结束>` 查看对应函数，确认指令形态的变化。
 3. 调整 `native_symbols.cpp` 中对应的匹配规则，并保证在已校验版本上 `native_layout_from_symbols` 仍然通过。
 
+没有那台机器时，可以从微软符号服务器取到别的版本的组件：在 [Winbindex](https://winbindex.m417z.com/) 查到文件的时间戳与 `SizeOfImage`，下载 `https://msdl.microsoft.com/download/symbols/InputService.dll/<时间戳8位大写十六进制><SizeOfImage小写十六进制>/InputService.dll`（ChsProxyDS.dll、ChsEM.dll 同理），放进同一个目录，然后：
+
+```powershell
+.\out\core\Release\PinyinFluxLayoutTest.exe <目录>                                   # 离线解析该版本的布局
+.\out\core\Release\PinyinFluxNativeTest.exe out\core\Release\PinyinFluxInject.dll --images <目录>
+```
+
+后者在隔离进程中装上钩子并测试重定向与恢复；扩展只接受系统目录中的组件，本地验证时需临时放开 `native_hook.cpp` 的 `SystemModule` 检查（不要提交）。
+
+Windows 11 22H2/23H2（22621/22631）的 InputService 以 XFG 编译：虚函数调用前多一条 `movabs r10, <类型哈希>`，寄存器分配也与 24H2 不同，匹配规则需容许这些差异。
+
 ## 发布
 
 版本由 `CHANGELOG.md` 驱动，与 EncoDeck 相同：

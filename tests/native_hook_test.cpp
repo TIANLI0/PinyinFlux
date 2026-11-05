@@ -32,7 +32,11 @@ void** Import(HMODULE module, const char* wanted) {
 int wmain(int argc, wchar_t** argv) {
   if (argc < 2) return 2;
   bool unsupported = false, legacy = false, cached = false;
-  for (int i = 2; i < argc; ++i) { unsupported |= wcscmp(argv[i], L"--unsupported") == 0; legacy |= wcscmp(argv[i], L"--legacy") == 0; cached |= wcscmp(argv[i], L"--cached") == 0; }
+  std::wstring images;  // --images <folder>: InputService.dll and ChsProxyDS.dll of another Windows build
+  for (int i = 2; i < argc; ++i) {
+    unsupported |= wcscmp(argv[i], L"--unsupported") == 0; legacy |= wcscmp(argv[i], L"--legacy") == 0; cached |= wcscmp(argv[i], L"--cached") == 0;
+    if (wcscmp(argv[i], L"--images") == 0 && i + 1 < argc) images = argv[++i];
+  }
   WSADATA wsa{}; WSAStartup(MAKEWORD(2, 2), &wsa);
   SOCKET listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   sockaddr_in address{}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -42,11 +46,12 @@ int wmain(int argc, wchar_t** argv) {
   auto* channel = static_cast<Channel*>(MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(Channel)));
   if (!channel) return 4;
   new (channel) Channel(); channel->port = ntohs(address.sin_port);
-  printf("layout: %s\n", pf::ResolveNativeLayout(channel->layout).c_str());
+  printf("layout: %s\n", pf::ResolveNativeLayout(channel->layout, nullptr, images).c_str());
   InterlockedExchange(&channel->heartbeat, static_cast<LONG>(GetTickCount()));
   wchar_t system[MAX_PATH]{}; GetSystemDirectoryW(system, ARRAYSIZE(system));
-  std::wstring prefix = std::wstring(system) + L"\\InputMethod\\CHS\\";
-  HMODULE engine = LoadLibraryExW((legacy ? prefix + L"ChsEM.dll" : std::wstring(system) + L"\\InputService.dll").c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
+  std::wstring prefix = images.empty() ? std::wstring(system) + L"\\InputMethod\\CHS\\" : images + L"\\";
+  std::wstring engineDir = images.empty() ? std::wstring(system) + L"\\" : images + L"\\";
+  HMODULE engine = LoadLibraryExW((legacy ? prefix + L"ChsEM.dll" : engineDir + L"InputService.dll").c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
   HMODULE proxy = LoadLibraryExW((prefix + L"ChsProxyDS.dll").c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
   HMODULE extension = LoadLibraryW(argv[1]);
   if (!engine || !proxy) { puts("SKIP Microsoft Pinyin components not available"); return 77; }  // CTest skip code

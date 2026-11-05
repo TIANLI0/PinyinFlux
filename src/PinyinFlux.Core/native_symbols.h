@@ -46,7 +46,9 @@ struct LayoutReport {
 
 // Resolves everything the extension needs for the installed images. Returns
 // a summary for the status page ("symbols", "built-in", or what is missing).
-std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* report = nullptr);
+// `images` replaces the system directory (development: a folder holding
+// InputService.dll, ChsProxyDS.dll and ChsEM.dll of another Windows build).
+std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* report = nullptr, const std::wstring& images = {});
 
 // TimeDateStamp and SizeOfImage of an image file on disk (zero when unreadable).
 native::ImageId ImageOnDisk(const std::wstring& path);
