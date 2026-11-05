@@ -4,6 +4,7 @@
 #include "json.h"
 #include "log.h"
 #include "config.h"
+#include "native_compat.h"
 #include "native_symbols.h"
 #include <tlhelp32.h>
 #include <wincrypt.h>
@@ -17,7 +18,10 @@ struct Entry {
   DWORD pid = 0, error = 0;
   HANDLE process = nullptr, mapping = nullptr;
   native::Channel* channel = nullptr;
-  ULONG typingSeen[5]{};  // statistics counters already added to TypingStats
+  ULONG typingSeen[6]{};  // statistics counters already added to TypingStats
+  LONG choicesSeen = 0;   // cloud choices already passed to the ranking model
+  ULONGLONG injectedAt = 0;
+  bool exitSeen = false;
   ~Entry() {
     if (channel) UnmapViewOfFile(channel);
     if (mapping) CloseHandle(mapping);
@@ -138,6 +142,29 @@ DWORD Inject(Entry& entry, const std::wstring& dll, uintptr_t initializeRva) {
   }
   return RemoteCall(entry.process, remote + initializeRva, nullptr);
 }
+
+// TimeDateStamp and SizeOfImage of the image loaded at `base` in another process.
+native::ImageId LoadedImage(DWORD pid, uintptr_t base) {
+  native::ImageId id;
+  HANDLE process = OpenProcess(PROCESS_VM_READ | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+  if (!process) return id;
+  IMAGE_DOS_HEADER dos{};
+  IMAGE_NT_HEADERS64 nt{};
+  SIZE_T read = 0;
+  if (ReadProcessMemory(process, reinterpret_cast<void*>(base), &dos, sizeof(dos), &read) && dos.e_magic == IMAGE_DOS_SIGNATURE &&
+      ReadProcessMemory(process, reinterpret_cast<void*>(base + dos.e_lfanew), &nt, sizeof(nt), &read) && nt.Signature == IMAGE_NT_SIGNATURE)
+    id = {nt.FileHeader.TimeDateStamp, nt.OptionalHeader.SizeOfImage};
+  CloseHandle(process);
+  return id;
+}
+// A process that ends with an exception code (access violation, stack buffer
+// overrun, heap corruption, ...) crashed.
+bool Crashed(DWORD exitCode) { return (exitCode & 0xC0000000) == 0xC0000000; }
+// A host which crashes this soon after injection counts against the build;
+// this many times and the build is no longer injected.
+constexpr ULONGLONG kCrashWindowMs = 10 * 60 * 1000;
+constexpr int kCrashLimit = 2;
+constexpr ULONGLONG kSymbolRetryMs = 60 * 1000;
 }  // namespace
 
 NativeInjector::~NativeInjector() { Stop(); }
@@ -156,38 +183,83 @@ void NativeInjector::Stop() {
   if (stop_) { CloseHandle(stop_); stop_ = nullptr; }
 }
 DWORD WINAPI NativeInjector::Thread(void* self) { static_cast<NativeInjector*>(self)->Run(); return 0; }
+void NativeInjector::SetCompat(const char* state, const std::string& detail) {
+  std::lock_guard lock(layoutMutex_);
+  compatState_ = state;
+  compatDetail_ = detail;
+}
 void NativeInjector::Run() {
   std::wstring dll = CacheDll();
-  if (dll.empty()) { lastError_ = ERROR_MOD_NOT_FOUND; errors_ = 1; return; }
+  if (dll.empty()) { lastError_ = ERROR_MOD_NOT_FOUND; errors_ = 1; SetCompat("error", "extension missing"); return; }
   HMODULE image = LoadLibraryExW(dll.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
   auto initialize = image ? GetProcAddress(image, "PinyinFluxInitialize") : nullptr;
   uintptr_t rva = initialize ? reinterpret_cast<uintptr_t>(initialize) - reinterpret_cast<uintptr_t>(image) : 0;
   if (image) FreeLibrary(image);
-  if (!rva) { lastError_ = ERROR_PROC_NOT_FOUND; errors_ = 1; return; }
-  // Addresses for the installed Windows build, from Microsoft's public symbols.
+  if (!rva) { lastError_ = ERROR_PROC_NOT_FOUND; errors_ = 1; SetCompat("error", "extension invalid"); return; }
+  wchar_t system[MAX_PATH]{}; GetSystemDirectoryW(system, ARRAYSIZE(system));
+  const std::wstring engineDll = std::wstring(system) + L"\\InputService.dll";
+  const std::wstring legacyDll = std::wstring(system) + L"\\InputMethod\\CHS\\ChsEM.dll";
+  CompatStore store(CompatStore::DefaultPath());
+  // Addresses for the installed Windows build, from Microsoft's public symbols;
+  // then whether this build was verified with this extension (see native_compat.h).
   native::NativeLayout layout;
-  std::string summary = ResolveNativeLayout(layout);
-  { std::lock_guard lock(layoutMutex_); layoutSummary_ = summary; }
+  std::string key;
+  bool resolved = false, allowed = false;
+  ULONGLONG nextResolve = 0;
+  auto resolve = [&] {
+    LayoutReport report;
+    std::string summary = ResolveNativeLayout(layout, &report);
+    { std::lock_guard lock(layoutMutex_); layoutSummary_ = summary; windowsVersion_ = report.version; }
+    if (!report.usable) {
+      if (report.missingSymbols) {
+        // Usually no network yet right after a Windows update and restart.
+        nextResolve = GetTickCount64() + kSymbolRetryMs;
+        SetCompat("waitingSymbols", summary);
+        Log("native: public symbols unavailable (%s); retrying in %llu s", summary.c_str(), kSymbolRetryMs / 1000);
+      } else {
+        resolved = true;
+        SetCompat("unsupported", summary);
+        Log("native: this Windows build is not supported (%s)", summary.c_str());
+      }
+      return;
+    }
+    resolved = true;
+    key = CompatKey(layout, dll);
+    CompatStore::Entry verdict = store.Get(key);
+    if (verdict.verdict == CompatStore::Unknown) {
+      SetCompat("checking", {});
+      Log("native: checking %s in a separate process", key.c_str());
+      std::string detail;
+      bool passed = Preflight(dll, detail);
+      verdict = {passed ? CompatStore::Pass : CompatStore::Fail, 0, detail};
+      store.Set(key, verdict);
+      Log("native: compatibility check %s", detail.c_str());
+    }
+    allowed = verdict.verdict == CompatStore::Pass;
+    SetCompat(allowed ? "verified" : verdict.verdict == CompatStore::Crashed ? "crashed" : "unsupported", verdict.detail);
+  };
   std::vector<std::unique_ptr<Entry>> entries;
   DWORD session = 0; ProcessIdToSessionId(GetCurrentProcessId(), &session);
   DWORD scanned = 0, flushed = GetTickCount();
   while (WaitForSingleObject(stop_, 100) == WAIT_TIMEOUT) {
-    if (GetTickCount() - scanned >= 2000) {
+    if (!resolved && GetTickCount64() >= nextResolve) resolve();
+    if (allowed && GetTickCount() - scanned >= 2000) {
       scanned = GetTickCount();
       HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
       PROCESSENTRY32W process{sizeof(process)};
       if (snapshot != INVALID_HANDLE_VALUE) {
-        for (BOOL ok = Process32FirstW(snapshot, &process); ok; ok = Process32NextW(snapshot, &process)) {
+        for (BOOL ok = Process32FirstW(snapshot, &process); ok && allowed; ok = Process32NextW(snapshot, &process)) {
           if (_wcsicmp(process.szExeFile, L"ChsIME.exe") != 0 && _wcsicmp(process.szExeFile, L"ctfmon.exe") != 0) continue;
           DWORD targetSession = 0;
           if (!ProcessIdToSessionId(process.th32ProcessID, &targetSession) || targetSession != session) continue;
           bool known = false;
           for (const auto& e : entries) if (e->pid == process.th32ProcessID) known = true;
           if (known) continue;
-          wchar_t system[MAX_PATH]{}; GetSystemDirectoryW(system, ARRAYSIZE(system));
           // Ignore dormant brokers which do not actually host the input engine.
-          if (!Module(process.th32ProcessID, std::wstring(system) + L"\\InputService.dll") &&
-              !Module(process.th32ProcessID, std::wstring(system) + L"\\InputMethod\\CHS\\ChsEM.dll")) {
+          bool legacy = false;
+          uintptr_t base = Module(process.th32ProcessID, engineDll);
+          if (!base) { base = Module(process.th32ProcessID, legacyDll); legacy = base != 0; }
+          if (!base) {
             if (GetLastError() == ERROR_ACCESS_DENIED) {
               auto entry = std::make_unique<Entry>(); entry->pid = process.th32ProcessID; entry->error = ERROR_ACCESS_DENIED;
               entries.push_back(std::move(entry)); lastError_ = ERROR_ACCESS_DENIED;
@@ -195,17 +267,36 @@ void NativeInjector::Run() {
             continue;
           }
           auto entry = std::make_unique<Entry>(); entry->pid = process.th32ProcessID;
+          // The host must run the very images the layout and the check describe.
+          const native::ImageId& expected = legacy ? layout.legacy.image : layout.engine.image;
+          native::ImageId loaded = LoadedImage(entry->pid, base);
+          if (loaded.stamp && !(loaded == expected)) {
+            if (!(ImageOnDisk(legacy ? legacyDll : engineDll) == expected)) {
+              // Windows replaced the images since they were resolved.
+              Log("native: Microsoft Pinyin changed on disk; resolving again");
+              resolved = allowed = false;
+              nextResolve = 0;
+              break;
+            }
+            // Updated on disk, but this host started before: the update awaits a restart.
+            entry->error = ERROR_SUCCESS_REBOOT_REQUIRED;
+            Log("native: pid %lu still runs the previous Microsoft Pinyin; waiting for a restart", entry->pid);
+            entries.push_back(std::move(entry));
+            continue;
+          }
           entry->mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(native::Channel), native::MappingName(entry->pid).c_str());
           bool created = entry->mapping && GetLastError() != ERROR_ALREADY_EXISTS;
           if (entry->mapping) entry->channel = static_cast<native::Channel*>(MapViewOfFile(entry->mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(native::Channel)));
           if (entry->channel) {
             if (created) new (entry->channel) native::Channel();
             if (entry->channel->magic == native::kMagic) {
+              entry->choicesSeen = InterlockedCompareExchange(&entry->channel->choiceCount, 0, 0);
               entry->channel->layout = layout;
               entry->channel->port = static_cast<DWORD>(port_.load());
               InterlockedExchange(&entry->channel->heartbeat, static_cast<LONG>(GetTickCount()));
               InterlockedExchange(&entry->channel->enabled, 1);
               entry->error = Inject(*entry, dll, rva);
+              entry->injectedAt = GetTickCount64();
             } else entry->error = ERROR_INVALID_DATA;
           } else entry->error = GetLastError();
           if (entry->error) { lastError_ = entry->error; Log("native: pid %lu injection failed (%lu)", entry->pid, entry->error); }
@@ -215,11 +306,39 @@ void NativeInjector::Run() {
         CloseHandle(snapshot);
       }
     }
-    LONG ready = 0, pending = 0, denied = 0, unsupported = 0, errors = 0, triggers = 0, requests = 0;
-    LONG notifications = 0;
+    LONG ready = 0, pending = 0, denied = 0, unsupported = 0, errors = 0, triggers = 0, requests = 0, restartPending = 0;
+    LONG notifications = 0, timedCount = 0, timedSum[3]{}, timedBuckets[native::kTimedBuckets]{}, cloudDelay = -1, missed = 0;
+    LONG doublePinyin = 0;
     for (const auto& entry : entries) {
-      if (entry->process && WaitForSingleObject(entry->process, 0) == WAIT_OBJECT_0) continue;
-      if (entry->error) { if (entry->error == ERROR_ACCESS_DENIED) ++denied; else ++errors; continue; }
+      if (entry->process && WaitForSingleObject(entry->process, 0) == WAIT_OBJECT_0) {
+        if (!entry->exitSeen) {
+          entry->exitSeen = true;
+          DWORD code = 0;
+          GetExitCodeProcess(entry->process, &code);
+          const ULONGLONG lived = GetTickCount64() - entry->injectedAt;
+          // A host that crashes soon after we entered it may have been crashed by us.
+          if (!entry->error && entry->injectedAt && lived < kCrashWindowMs && Crashed(code) && !key.empty()) {
+            int crashes = store.Crash(key);
+            Log("native: pid %lu crashed (0x%08lx) %llu s after injection (%d)", entry->pid, code, lived / 1000, crashes);
+            if (crashes >= kCrashLimit && allowed) {
+              char detail[96];
+              std::snprintf(detail, sizeof(detail), "input host crashed %d times soon after injection (last 0x%08lx)", crashes, code);
+              store.Set(key, {CompatStore::Crashed, crashes, detail});
+              allowed = false;
+              SetCompat("crashed", detail);
+              for (const auto& other : entries) if (other->channel) InterlockedExchange(&other->channel->enabled, 0);
+            }
+          }
+        }
+        continue;
+      }
+      if (entry->error) {
+        if (entry->error == ERROR_ACCESS_DENIED) ++denied;
+        else if (entry->error == ERROR_SUCCESS_REBOOT_REQUIRED) ++restartPending;
+        else ++errors;
+        continue;
+      }
+      if (!allowed) continue;  // stopped after crashes: the extension restores itself
       auto* c = entry->channel;
       c->port = static_cast<DWORD>(port_.load());
       InterlockedExchange(&c->heartbeat, static_cast<LONG>(GetTickCount()));
@@ -235,23 +354,51 @@ void NativeInjector::Run() {
       lastFlags_ = InterlockedCompareExchange(&c->lastFlags, 0, 0);
       settingsResult_ = InterlockedCompareExchange(&c->settingsResult, 0, 0);
       for (int i = 0; i < 36; ++i) diagnostics_[i] = InterlockedCompareExchange(&c->diagnostics[i], 0, 0);
+      timedCount += InterlockedCompareExchange(&c->timedCount, 0, 0);
+      for (int i = 0; i < 3; ++i) timedSum[i] += InterlockedCompareExchange(&c->timedSum[i], 0, 0);
+      for (int i = 0; i < native::kTimedBuckets; ++i) timedBuckets[i] += InterlockedCompareExchange(&c->timedBuckets[i], 0, 0);
+      if (LONG delay = InterlockedCompareExchange(&c->cloudDelay, 0, 0); delay >= 0) cloudDelay = delay;
+      missed += InterlockedCompareExchange(&c->timedMissed, 0, 0);
+      doublePinyin |= InterlockedCompareExchange(&c->doublePinyin, 0, 0);
       InterlockedExchange(&c->statsEnabled, CurrentConfig()->typingStats ? 1 : 0);
       // The extension's counters only grow (and may wrap); take what's new since the last pass.
-      volatile LONG* counters[5] = {&c->statCommits, &c->statChars, &c->statLetters, &c->statCloud, &c->statActiveMs};
-      ULONG delta[5]{};
-      for (int i = 0; i < 5; ++i) {
+      volatile LONG* counters[6] = {&c->statCommits, &c->statChars, &c->statLetters, &c->statCloud, &c->statActiveMs, &c->statShown};
+      ULONG delta[6]{};
+      for (int i = 0; i < 6; ++i) {
         ULONG now = static_cast<ULONG>(InterlockedCompareExchange(counters[i], 0, 0));
         delta[i] = now - entry->typingSeen[i];
         entry->typingSeen[i] = now;
       }
-      typing_.Add({delta[0], delta[1], delta[2], delta[3], delta[4]});
+      TypingDay day;
+      day.commits = delta[0]; day.chars = delta[1]; day.letters = delta[2]; day.cloud = delta[3]; day.activeMs = delta[4]; day.shown = delta[5];
+      typing_.Add(day);
+      // Choices written since the last pass; older ones were overwritten if over kChoices.
+      LONG written = InterlockedCompareExchange(&c->choiceCount, 0, 0);
+      if (written - entry->choicesSeen > native::kChoices) entry->choicesSeen = written - native::kChoices;
+      for (; ranking_ && entry->choicesSeen - written < 0; ++entry->choicesSeen) {
+        const native::Choice choice = c->choices[static_cast<ULONG>(entry->choicesSeen) % native::kChoices];
+        ranking_->Choose(static_cast<DWORD>(choice.answer), static_cast<DWORD>(choice.shown), choice.picked);
+      }
     }
-    if (GetTickCount() - flushed >= 60 * 1000) { flushed = GetTickCount(); typing_.Flush(); }
+    if (GetTickCount() - flushed >= 60 * 1000) {
+      flushed = GetTickCount();
+      typing_.Flush();
+      if (ranking_) ranking_->Save();
+    }
     ready_ = ready; pending_ = pending; denied_ = denied; unsupported_ = unsupported; errors_ = errors;
-    triggers_ = triggers; requests_ = requests;
+    triggers_ = triggers; requests_ = requests; restartPending_ = restartPending; doublePinyin_ = doublePinyin;
     notifications_ = notifications;
+    {
+      std::lock_guard lock(layoutMutex_);
+      timing_.count = timedCount;
+      for (int i = 0; i < 3; ++i) timing_.sum[i] = timedSum[i];
+      for (int i = 0; i < native::kTimedBuckets; ++i) timing_.buckets[i] = timedBuckets[i];
+      timing_.cloudDelay = cloudDelay;
+      timing_.missed = missed;
+    }
   }
   typing_.Flush();
+  if (ranking_) ranking_->Save();
   for (const auto& entry : entries) if (entry->channel) InterlockedExchange(&entry->channel->enabled, 0);
   // Wait for the DLL to restore its slots before a replacement version can
   // install new hooks in the same host. Callback storage remains mapped there.
@@ -267,11 +414,30 @@ void NativeInjector::Run() {
   }
 }
 std::string NativeInjector::StatusJson() const {
-  std::string summary;
-  { std::lock_guard lock(layoutMutex_); summary = layoutSummary_; }
+  std::string summary, compat = ",\"nativeCompat\":{\"state\":", timing = ",\"nativeTiming\":{\"count\":";
+  {
+    std::lock_guard lock(layoutMutex_);
+    summary = layoutSummary_;
+    json::AppendQuoted(compat, compatState_);
+    compat += ",\"detail\":";
+    json::AppendQuoted(compat, compatDetail_);
+    compat += ",\"windows\":";
+    json::AppendQuoted(compat, windowsVersion_);
+    compat += '}';
+    // Averages in ms over the cloud words displayed so far.
+    const LONG n = timing_.count;
+    auto average = [n](LONG sum) { return std::to_string(n ? sum / n : 0); };
+    timing += std::to_string(n) + ",\"pauseMs\":" + average(timing_.sum[0]) + ",\"answerMs\":" + average(timing_.sum[1]) +
+              ",\"replayMs\":" + average(timing_.sum[2]) + ",\"cloudDelayMs\":" + std::to_string(timing_.cloudDelay) +
+              ",\"missed\":" + std::to_string(timing_.missed) + ",\"totals\":[";
+    for (int i = 0; i < native::kTimedBuckets; ++i) timing += (i ? "," : "") + std::to_string(timing_.buckets[i]);
+    timing += "]}";
+  }
   std::string layoutJson;
   json::AppendQuoted(layoutJson, summary);
-  return ",\"nativeMode\":true,\"nativeLayout\":" + layoutJson + ",\"nativeReady\":" + std::to_string(ready_.load()) +
+  return ",\"nativeMode\":true,\"nativeLayout\":" + layoutJson + compat + timing +
+      ",\"nativeRestartPending\":" + std::to_string(restartPending_.load()) +
+      ",\"nativeDoublePinyin\":" + (doublePinyin_.load() ? "true" : "false") + ",\"nativeReady\":" + std::to_string(ready_.load()) +
       ",\"nativePending\":" + std::to_string(pending_.load()) + ",\"nativeDenied\":" + std::to_string(denied_.load()) +
       ",\"nativeUnsupported\":" + std::to_string(unsupported_.load()) + ",\"nativeErrors\":" + std::to_string(errors_.load()) +
       ",\"nativeLastError\":" + std::to_string(lastError_.load()) + ",\"nativeTriggers\":" + std::to_string(triggers_.load()) +

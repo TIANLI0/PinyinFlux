@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "../src/PinyinFlux.Core/engine.h"
 #include "../src/PinyinFlux.Core/providers/sogou.h"
+#include "../src/PinyinFlux.Inject/protocol.h"
+#include <cmath>
 #include <cstdio>
 #include <thread>
 
@@ -9,8 +11,10 @@ struct FakeProvider final : Provider {
   int delay, calls = 0;
   bool success;
   std::vector<Candidate> answer;
-  FakeProvider(int ms, bool ok, std::vector<Candidate> words) : delay(ms), success(ok), answer(std::move(words)) {}
-  const char* Name() const override { return "fixture"; }
+  const char* name;
+  FakeProvider(int ms, bool ok, std::vector<Candidate> words, const char* id = "fixture")
+      : delay(ms), success(ok), answer(std::move(words)), name(id) {}
+  const char* Name() const override { return name; }
   bool Query(const std::string&, int, std::vector<Candidate>& out) override {
     ++calls; Sleep(delay); out = answer; return success;
   }
@@ -110,44 +114,140 @@ int main() {
   const std::vector<bool> both{true, true}, onlyFirst{true, false};
   // Sogou answers abbreviations without a full reading; borrow Baidu's.
   Candidate sogouGenshin{"原神启动", 10, true, ""};
-  result = RankCandidates({{sogouGenshin}, {genshin}}, both, "yuanshenqd", true, 4);
+  result = RankCandidates({{sogouGenshin}, {genshin}}, both, "yuanshenqd", true, 4).words;
   if (result.size() != 1 || NativeReading("yuanshenqd", result[0]) != "yuan shen qi dong") return 17;
-  result = RankCandidates({{sogouGenshin}}, {true}, "yuanshenqd", true, 4);
+  result = RankCandidates({{sogouGenshin}}, {true}, "yuanshenqd", true, 4).words;
   if (!result.empty()) return 18;
   puts("PASS reading-less abbreviated answer borrows a verified reading, else is dropped");
   // Observed answers. Abbreviations keep the preferred source's guess.
   Candidate yyds{"永远的神", 15, true, "yong'yuan'de'shen"}, generic{"永远都是", 16, true, "yong'yuan'dou'shi"};
-  result = RankCandidates({{yyds, generic}, {Candidate{"永远都是", 4, true, ""}}}, both, "yyds", true, 1);
+  result = RankCandidates({{yyds, generic}, {Candidate{"永远都是", 4, true, ""}}}, both, "yyds", true, 1).words;
   if (result.size() != 1 || result[0].text != yyds.text) return 10;
   // Full pinyin: Baidu answers a homophone, Sogou the word the local dictionary has.
   Candidate wrong{"中果人", 11, true, "zhong'guo'ren"}, right{"中国人", 11, true, "zhong'guo'ren"};
-  result = RankCandidates({{wrong}, {right}}, both, "zhongguoren", true, 1);
+  result = RankCandidates({{wrong}, {right}}, both, "zhongguoren", true, 1).words;
   if (!result.empty()) return 11;
-  result = RankCandidates({{homophone, valid}, {Candidate{"决曲零", 9, true, "jue'qu'ling"}, valid}}, both, "juequling", true, 1);
+  result = RankCandidates({{homophone, valid}, {Candidate{"决曲零", 9, true, "jue'qu'ling"}, valid}}, both, "juequling", true, 1).words;
   if (result.size() != 1 || result[0].text != valid.text) return 12;
   // A single usable answer counts once every other source has answered.
-  result = RankCandidates({{valid}, {}}, both, "juequling", true, 1);
+  result = RankCandidates({{valid}, {}}, both, "juequling", true, 1).words;
   if (result.size() != 1) return 13;
-  result = RankCandidates({{valid}, {}}, onlyFirst, "juequling", true, 1);
+  result = RankCandidates({{valid}, {}}, onlyFirst, "juequling", true, 1).words;
   if (!result.empty()) return 19;
   Candidate mash{"但是家里发大水了咖啡机", 22, true, "dan'shi'jia'li'fa'da'shui'le'ka'fei'ji"};
   Candidate mashOther{"但是家里反对十六块腹肌", 11, true, ""};
-  result = RankCandidates({{mash}, {mashOther}}, both, "dsjlfdslkfj", true, 1);
+  result = RankCandidates({{mash}, {mashOther}}, both, "dsjlfdslkfj", true, 1).words;
   if (!result.empty()) return 20;
   Candidate prc{"中华人民共和国", 21, true, "zhong'hua'ren'min'gong'he'guo"};
-  result = RankCandidates({{prc}, {Candidate{"中华人民共和国", 7, true, ""}}}, both, "zhrmghg", true, 1);
+  result = RankCandidates({{prc}, {Candidate{"中华人民共和国", 7, true, ""}}}, both, "zhrmghg", true, 1).words;
   if (result.size() != 1 || result[0].text != prc.text) return 21;
   puts("PASS abbreviations keep the preferred guess; full pinyin needs agreement or an uncontested answer");
   puts("PASS long initials need a second source");
-  // Up to three words: the best, then confirmed ones (two sources, each in its top two).
+  // Up to three words in score order; full pinyin only confirmed ones (two sources, each in its top two).
   Candidate nihao{"你好", 5, true, "ni'hao"}, nihao2{"你号", 5, true, "ni'hao"}, nihao3{"泥嚎", 5, true, "ni'hao"};
-  result = RankCandidates({{nihao, nihao2, nihao3}, {nihao, nihao2, nihao3}}, both, "nihao", true, 3);
+  result = RankCandidates({{nihao, nihao2, nihao3}, {nihao, nihao2, nihao3}}, both, "nihao", true, 3).words;
   if (result.size() != 2 || result[0].text != nihao.text || result[1].text != nihao2.text) return 22;
   Candidate yongyuan{"永远滴神", 15, true, "yong'yuan'di'shen"};
   result = RankCandidates({{yyds, generic, yongyuan}, {Candidate{"永远都是", 4, true, ""}, Candidate{"永远滴神", 4, true, ""}}},
-                          both, "yyds", true, 3);
+                          both, "yyds", true, 3).words;
   if (result.size() != 2 || result[0].text != yyds.text || result[1].text != generic.text) return 23;
-  puts("PASS confirmed words follow the best cloud word; lower homophones stay out");
+  puts("PASS further words need half the best score; lower homophones stay out");
+  // Adaptive count and priority. Default scores: 永远的神 1.0, 永远滴神 0.8 (second source), 永远都是 0.5.
+  Candidate didi{"永远滴神", 15, true, "yong'yuan'di'shen"};
+  const std::vector<std::string> names{"baidu", "sogou"};
+  Ranking ranking = RankCandidates({{yyds, generic}, {didi}}, both, "yyds", true, 3);
+  if (ranking.mode != kAbbreviated || ranking.words.size() != 3 || ranking.words[0].text != yyds.text ||
+      ranking.words[1].text != didi.text || ranking.ranks[1] != std::vector<int>{-1, 0}) return 24;
+  RankPolicy loose;
+  loose.threshold[kAbbreviated] = 0.3;
+  if (RankCandidates({{yyds, generic, didi}}, {true}, "yyds", true, 3).words.size() != 2 ||
+      RankCandidates({{yyds, generic, didi}}, {true}, "yyds", true, 3, loose).words.size() != 3) return 25;
+  puts("PASS several cloud words when their scores are close; the threshold sets how many");
+  auto hashOf = [](const std::vector<Candidate>& words) {
+    std::vector<std::wstring> texts;
+    for (const auto& w : words) texts.push_back(Utf8ToWide(w.text));
+    return native::AnswerHash(texts);
+  };
+  const DWORD answer = hashOf(ranking.words);
+  RankModel model;
+  if (model.Choose(answer, 7, 1)) return 26;  // never served
+  model.Served(names, ranking);
+  if (model.Choose(answer, 5, 1)) return 27;  // word 1 was not shown
+  for (int i = 0; i < 3; ++i)
+    if (!model.Choose(answer, 7, 1)) return 28;
+  RankPolicy policy = model.Policy(names);
+  if (RankCandidates({{yyds, generic}, {didi}}, both, "yyds", true, 3, policy).words[0].text != didi.text) return 29;
+  if (std::fabs(policy.weights[kFullPinyin][0] - 1.0) > 1e-9 || std::fabs(policy.weights[kFullPinyin][1] - 0.8) > 1e-9) return 30;
+  puts("PASS three picks of the second source's word put it first; full pinyin learns separately");
+  RankModel picky;  // never takes a further word
+  picky.Served(names, ranking);
+  for (int i = 0; i < 300; ++i) picky.Choose(answer, 7, 0);
+  policy = picky.Policy(names);
+  if (policy.threshold[kAbbreviated] < 0.9 || std::fabs(policy.threshold[kFullPinyin] - 0.5) > 1e-9 ||
+      RankCandidates({{yyds, generic}, {didi}}, both, "yyds", true, 3, policy).words.size() != 1) return 31;
+  RankModel eager;  // takes the third word a third of the time
+  eager.Served(names, ranking);
+  for (int i = 0; i < 100; ++i) eager.Choose(answer, 7, i % 3 ? 0 : 2);
+  if (eager.Policy(names).threshold[kAbbreviated] > 0.4) return 32;
+  // Full pinyin: the best word is local and hidden, so the shown one is the second (wangluo -> 王洛).
+  Candidate network{"网络", 7, true, "wang'luo"}, name{"王洛", 7, true, "wang'luo"};
+  Ranking homophones = RankCandidates({{network, name}, {network, name}}, both, "wangluo", true, 3);
+  if (homophones.words.size() != 2 || homophones.mode != kFullPinyin) return 38;
+  RankModel ignoring;
+  ignoring.Served(names, homophones);
+  for (int i = 0; i < 40; ++i) ignoring.Choose(hashOf(homophones.words), 2, -1);
+  if (RankCandidates({{network, name}, {network, name}}, both, "wangluo", true, 3, ignoring.Policy(names)).words.size() != 1) return 39;
+  puts("PASS further words are offered more when picked, less when ignored");
+  // Most commits take a local word, so real pick rates are low. A source picked
+  // more often than another must still lead (nihao: Sogou answers 你号 first).
+  Ranking split = RankCandidates({{nihao, nihao2}, {nihao2, nihao}}, both, "nihao", true, 3);
+  if (split.mode != kFullPinyin || split.words.size() != 2 || split.words[0].text != nihao.text) return 40;
+  RankModel rare;
+  rare.Served(names, split);
+  for (int i = 0; i < 2000; ++i) rare.Choose(hashOf(split.words), 3, i % 50 == 49 ? 1 : -1);
+  result = RankCandidates({{nihao, nihao2}, {nihao2, nihao}}, both, "nihao", true, 3, rare.Policy(names)).words;
+  if (result.empty() || result[0].text != nihao2.text) return 41;
+  puts("PASS a source picked one time in fifty keeps its learned lead");
+  auto shared = std::make_shared<RankModel>();
+  auto baidu = std::make_shared<FakeProvider>(1, true, std::vector<Candidate>{yyds, generic}, "baidu");
+  auto sogou = std::make_shared<FakeProvider>(1, true, std::vector<Candidate>{didi}, "sogou");
+  Engine adaptive({baidu, sogou}, 450, 4, shared);
+  result = adaptive.QueryCandidates("yyds", true);
+  if (result.size() != 3 || result[0].text != yyds.text) return 33;
+  for (int i = 0; i < 3; ++i)
+    if (!shared->Choose(hashOf(result), 7, 1)) return 34;
+  result = adaptive.QueryCandidates("yyds", true);
+  if (baidu->calls != 1 || result.empty() || result[0].text != didi.text) return 35;
+  puts("PASS a cached answer is re-ranked with what was just learned");
+  wchar_t temp[MAX_PATH]{};
+  GetTempPathW(MAX_PATH, temp);
+  const std::wstring path = std::wstring(temp) + L"PinyinFluxRankingTest.ini";
+  DeleteFileW(path.c_str());
+  {
+    RankModel saved(path);
+    saved.Served(names, ranking);
+    for (int i = 0; i < 3; ++i) saved.Choose(answer, 7, 1);
+    saved.Save();
+  }
+  RankPolicy expected = model.Policy(names), loaded = RankModel(path).Policy(names);
+  DeleteFileW(path.c_str());
+  for (int m = 0; m < kRankModes; ++m) {
+    if (std::fabs(expected.threshold[m] - loaded.threshold[m]) > 1e-3) return 36;
+    for (size_t p = 0; p < names.size(); ++p)
+      if (std::fabs(expected.weights[m][p] - loaded.weights[m][p]) > 1e-3) return 37;
+  }
+  puts("PASS learned counts survive a restart");
+  // Observed (ldsd): the filter kept all three words, Microsoft Pinyin displayed
+  // only the first. The others were never seen and must not count as ignored.
+  const std::vector<std::wstring> answered{L"辣动时代", L"劳动所得", L"两点睡的"};
+  native::Choice choice = native::ChoiceFor(answered, {L"陆地上的"}, 1, L"陆地上的");
+  if (choice.shown != 1 || choice.picked != -1 || static_cast<DWORD>(choice.answer) != native::AnswerHash(answered)) return 42;
+  if (native::ChoiceFor(answered, {}, 1, L"劳动所得").picked != -1) return 43;  // committed some other way
+  // A local word is filtered out, so the next one takes the displayed slot.
+  choice = native::ChoiceFor(answered, {L"辣动时代"}, 1, L"劳动所得");
+  if (choice.shown != 2 || choice.picked != 1) return 44;
+  if (native::ChoiceFor(answered, {}, 3, L"两点睡的").shown != 7 || native::ChoiceFor(answered, {}, 0, L"").shown != 0) return 45;
+  puts("PASS only displayed cloud words count as seen; a filtered local word passes the slot on");
   auto late = std::make_shared<FakeProvider>(600, true, std::vector<Candidate>{homophone, valid});
   auto early = std::make_shared<FakeProvider>(5, true, std::vector<Candidate>{valid});
   Engine backfill({late, early}, 2000, 4);

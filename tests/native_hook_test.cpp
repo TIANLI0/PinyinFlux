@@ -65,9 +65,11 @@ int wmain(int argc, wchar_t** argv) {
   HINTERNET cachedConnection = cached ? WinHttpConnect(session, L"cn.bing.com", 443, 0) : nullptr;
   auto initialize = reinterpret_cast<DWORD (WINAPI*)(void*)>(GetProcAddress(extension, "PinyinFluxInitialize"));
   Check(initialize && initialize(nullptr) == ERROR_SUCCESS, "initialize outside loader lock");
-  for (int i = 0; i < 50 && channel->state == Waiting; ++i) {
+  ULONGLONG installing = GetTickCount64();
+  for (int i = 0; i < 250 && channel->state == Waiting; ++i) {
     InterlockedExchange(&channel->heartbeat, static_cast<LONG>(GetTickCount())); Sleep(20);
   }
+  printf("installed in %llu ms\n", GetTickCount64() - installing);
   if (unsupported) {
     Check(channel->state == Unsupported, "unknown Windows image fails closed");
     Check(channel->triggerSlots == 0 && channel->networkSlots == 0 && *slot == original, "unsupported version installs no hooks");
@@ -75,6 +77,8 @@ int wmain(int argc, wchar_t** argv) {
     VirtualProtect(&head->FileHeader.TimeDateStamp, sizeof(DWORD), protect, &ignored);
   } else {
     Check(channel->state == Active, "validated native candidate + network hooks active");
+    if (channel->state != Active)
+      printf("state %ld, error %ld, trigger slots %ld, network slots %ld\n", channel->state, channel->error, channel->triggerSlots, channel->networkSlots);
     if (channel->state != Active) return 6;
     Check(channel->triggerSlots > 0 && channel->networkSlots == 4 && *slot != original, "candidate vtable and all four WinHTTP imports patched");
     std::string observed;

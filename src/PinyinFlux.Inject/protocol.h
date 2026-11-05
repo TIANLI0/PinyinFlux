@@ -1,6 +1,9 @@
 #pragma once
 #include <windows.h>
+#include <algorithm>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace pf::native {
 inline constexpr DWORD kMagic = 0x50464e32;
@@ -59,12 +62,51 @@ struct ProxyLayout {
   Function addResponse;      // ChsQueryHandler::AddResponseInfor
   Function debounce;         // ChsQueryHandler::IsExpiredDuringCloudDelay
   DWORD requestLock = 0;     // ChsQueryHandler::s_fCloudTriggerring
+  DWORD cloudDelay = 0;      // ChsQueryHandler field: typing pause before a request, ms (0 = unknown)
 };
 struct NativeLayout {
   EngineLayout engine;
   LegacyLayout legacy;
   ProxyLayout proxy;
 };
+
+// Names a native cloud answer by its words (FNV-1a over UTF-16, each word
+// terminated), so a choice reported back to the core carries no text.
+inline DWORD AnswerHash(const std::vector<std::wstring>& words) {
+  DWORD hash = 2166136261u;
+  for (std::wstring_view word : words) {
+    for (wchar_t c : word) hash = (hash ^ static_cast<DWORD>(c)) * 16777619u;
+    hash *= 16777619u;
+  }
+  return hash;
+}
+// One commit while cloud words were shown, for adaptive ranking.
+struct Choice {
+  LONG answer = 0;  // AnswerHash of the response
+  LONG shown = 0;   // bit i: response word i was displayed
+  LONG picked = -1; // index of the committed response word, -1 for another word
+};
+inline constexpr LONG kChoices = 16;
+inline constexpr int kTimedBuckets = 5;
+inline constexpr LONG kTimedLimits[kTimedBuckets - 1] = {300, 600, 1000, 2000};
+// What the user saw of a cloud answer when `committed` was committed. The
+// native filter drops response words that are local candidates; Microsoft
+// Pinyin then displays as many of the rest as SetCloudExcerpts stored
+// (`displayed`), in order: one on the builds verified so far, though the
+// filter keeps up to three. Words it kept back were never seen, so they must
+// not count as ignored.
+inline Choice ChoiceFor(const std::vector<std::wstring>& response, const std::vector<std::wstring>& local,
+                        LONG displayed, std::wstring_view committed) {
+  Choice choice;
+  choice.answer = static_cast<LONG>(AnswerHash(response));
+  for (size_t i = 0; displayed > 0 && i < response.size() && i < 31; ++i) {
+    if (std::find(local.begin(), local.end(), response[i]) != local.end()) continue;
+    choice.shown |= 1L << i;
+    --displayed;
+    if (!committed.empty() && response[i] == committed) choice.picked = static_cast<LONG>(i);
+  }
+  return choice;
+}
 
 struct Channel {
   DWORD magic = kMagic;
@@ -88,10 +130,25 @@ struct Channel {
   volatile LONG statLetters = 0;   // pinyin letters typed for them
   volatile LONG statCloud = 0;     // conversions that were a PinyinFlux cloud word
   volatile LONG statActiveMs = 0;  // typing time, pauses excluded
+  volatile LONG statShown = 0;     // spellings for which a cloud word was displayed
+  // Adaptive ranking: the extension writes choices[n % kChoices], then raises
+  // choiceCount to n + 1; the core reads what is new since its last pass.
+  volatile LONG choiceCount = 0;
+  Choice choices[kChoices]{};
+  // How long a cloud word takes to appear, over the displays timed so far (ms):
+  // timedSum[0] last keystroke -> request (Microsoft's typing-pause wait),
+  // [1] request -> first answer (the core and the network), [2] first answer
+  // -> displayed (the replay). timedBuckets: totals < 300, 600, 1000, 2000, more.
+  volatile LONG timedCount = 0;
+  volatile LONG timedSum[3]{};
+  volatile LONG timedBuckets[kTimedBuckets]{};
+  volatile LONG cloudDelay = -1;   // ChsProxyDS's typing-pause wait as configured, ms (-1 unknown)
+  volatile LONG timedMissed = 0;   // commits while our cloud request was still unanswered
+  volatile LONG doublePinyin = 0;  // Microsoft Pinyin is set to 双拼: no cloud words from us
   NativeLayout layout;  // written by the core before the extension initializes
 };
 inline std::wstring MappingName(DWORD process) {
-  return L"Local\\PinyinFlux.Native.v6." + std::to_wstring(process);
+  return L"Local\\PinyinFlux.Native.v8." + std::to_wstring(process);
 }
 inline bool Enabled(Channel* c) {
   return c && c->magic == kMagic && InterlockedCompareExchange(&c->enabled, 0, 0) &&

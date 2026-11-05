@@ -348,12 +348,22 @@ void ProxyServer::ServeIntercepted(SOCKET client, const std::string& host) {
   tls.Shutdown();
 }
 
+// In 双拼 mode Microsoft Pinyin asks for the keys as typed ("nihk" for ni hao),
+// which the providers would read as pinyin (你好看). The extension leaves that
+// mode alone; this covers requests already under way when it is switched on.
+static bool DoublePinyin() {
+  DWORD value = 0, bytes = sizeof(value);
+  return RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\InputMethod\\Settings\\CHS", L"Enable Double Pinyin",
+                      RRF_RT_REG_DWORD, nullptr, &value, &bytes) == ERROR_SUCCESS && value != 0;
+}
+
 std::string ProxyServer::HandleCloudRequest(const std::string& query, std::string& contentType, bool nativeFormat) {
   contentType = "application/json; charset=utf-8";
   ++stats_.cloudRequests;
   std::string q = QueryParam(query, "q");
   std::string pinyin = ExtractCloudPinyin(q);
   Log("cloud: pinyin=\"%s\"", pinyin.c_str());
+  if (nativeFormat && DoublePinyin()) return BuildBingResponse(q, {});
   std::vector<std::string> words;
   if (!pinyin.empty()) {
     if (auto engine = engine_.load()) {

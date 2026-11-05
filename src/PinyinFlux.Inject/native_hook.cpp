@@ -22,6 +22,11 @@ using Changed = HRESULT (WINAPI*)(void*, DWORD);
 Changed originalChanged = nullptr;
 Changed originalDesktopChanged = nullptr;
 std::atomic<bool> cloudOptIn{false};
+std::atomic<bool> doublePinyin{false};  // Microsoft Pinyin is set to 双拼 (read in RunWorker)
+// Cloud words are ours to add: injected, enabled by the core, and full pinyin.
+// In 双拼 mode Microsoft Pinyin sends the keys as typed ("nihk" for ni hao),
+// which the providers would read as pinyin (你好看); its cloud is left alone then.
+bool CloudOn() { return live.load() && Enabled(channel) && !doublePinyin.load(); }
 bool modern = false;
 using Rule = HRESULT (WINAPI*)(void*);
 Rule originalRule = nullptr, settingsRule = nullptr;
@@ -58,6 +63,9 @@ std::unordered_map<HINTERNET, HINTERNET> requestParents;
 struct Patch { void** slot; void* before; void* after; };
 std::vector<Patch> patches;
 std::atomic<LONG> cloudWords{0};        // stored words of the latest response
+// When the cloud word of the spelling being typed got where (GetTickCount64,
+// 0 = not yet): the last keystroke, our redirected request, the first answer.
+std::atomic<ULONGLONG> keyTick{0}, requestTick{0}, arrivalTick{0};
 std::atomic<bool> replayQuery{false};   // the next request repeats a settled spelling
 thread_local void* desktopListener = nullptr;
 using Debounce = int (WINAPI*)(void*, void*);
@@ -87,19 +95,24 @@ bool PatchSlot(void** slot, void* value) {
   if (!Swap(slot, before, value)) { patches.pop_back(); return false; }
   return true;
 }
+// MinHook freezes every other thread of the host for each change it applies
+// (after a snapshot of all threads on the system); queue the changes and apply
+// them at once, so the input host stalls once per install or restore.
 void Restore() {
   live = false;
-  for (void* target : detours) MH_DisableHook(target);
+  for (void* target : detours) MH_QueueDisableHook(target);
+  MH_ApplyQueued();
   for (auto it = patches.rbegin(); it != patches.rend(); ++it) Swap(it->slot, it->after, it->before);
   patches.clear();
   // The DLL remains loaded: another thread may already have fetched a slot.
 }
+// Queues the detour; ApplyQueued below enables it with the others.
 bool Detour(void* target, void* replacement, void** original) {
   if (std::find(detours.begin(), detours.end(), target) == detours.end()) {
     if (MH_CreateHook(target, replacement, original) != MH_OK) return false;
     detours.push_back(target);
   }
-  return MH_EnableHook(target) == MH_OK;
+  return MH_QueueEnableHook(target) == MH_OK;
 }
 HRESULT WINAPI DesktopQuery(void* self) {
   InterlockedIncrement(&channel->diagnostics[0]);
@@ -231,7 +244,7 @@ HRESULT WINAPI CachedCandidates(void* self, void* output) {
   // The private cache also stores empty/error responses and outlives our core.
   // Use the provider-aware cache in the core while our replacement is active,
   // so a result from a previous DLL/provider configuration cannot suppress it.
-  if (live.load() && Enabled(channel)) {
+  if (CloudOn()) {
     if (output) *static_cast<void**>(output) = nullptr;
     return E_FAIL;  // The verified caller interprets failure as a cache miss.
   }
@@ -253,15 +266,34 @@ HRESULT WINAPI SetCloudExcerpts(void* self, void* excerpts) {
 // while waiting or when the cloud has nothing to add. The replayed query is
 // answered from the core's cache without the native typing debounce.
 thread_local bool regenerating = false;
-bool replayed = false;  // engine notification thread only
+bool replayed = false;   // engine notification thread only
+bool displayed = false;  // a cloud word is on screen for this spelling; engine thread only
+// The replayed answer filled the placeholder. Counted once per spelling, with
+// how long it took after the last keystroke.
+void RecordDisplay() {
+  if (displayed) return;
+  displayed = true;
+  if (InterlockedCompareExchange(&channel->statsEnabled, 0, 0)) InterlockedIncrement(&channel->statShown);
+  const ULONGLONG key = keyTick.load(), request = requestTick.load(), arrival = arrivalTick.load(), now = GetTickCount64();
+  if (!key || request < key || arrival < request || now < arrival || now - key > 60000) return;
+  InterlockedExchangeAdd(&channel->timedSum[0], static_cast<LONG>(request - key));
+  InterlockedExchangeAdd(&channel->timedSum[1], static_cast<LONG>(arrival - request));
+  InterlockedExchangeAdd(&channel->timedSum[2], static_cast<LONG>(now - arrival));
+  int bucket = 0;
+  while (bucket < kTimedBuckets - 1 && static_cast<LONG>(now - key) >= kTimedLimits[bucket]) ++bucket;
+  InterlockedIncrement(&channel->timedBuckets[bucket]);
+  InterlockedIncrement(&channel->timedCount);
+}
 HRESULT WINAPI PinyinChanged(void* self, DWORD flags) {
   if ((flags & 0x8) && !regenerating && !compositionStart) compositionStart = GetTickCount64();  // a keystroke
   if (flags & 0x1000) {
     InterlockedIncrement(&channel->diagnostics[32]);
     InterlockedExchange(&channel->diagnostics[34], cloudWords.load());
+    ULONGLONG none = 0;
+    if (!replayed && keyTick.load()) arrivalTick.compare_exchange_strong(none, GetTickCount64());
   }
   if (flags & 0x400) InterlockedIncrement(&channel->diagnostics[28]);
-  if ((flags & 0x1000) && !replayed && cloudWords.load() > 0 && desktopListener && live.load() && Enabled(channel) &&
+  if ((flags & 0x1000) && !replayed && cloudWords.load() > 0 && desktopListener && CloudOn() &&
       AddsCloudWord()) {
     replayed = true;
     regenerating = true;
@@ -276,15 +308,21 @@ HRESULT WINAPI PinyinChanged(void* self, DWORD flags) {
     if (SUCCEEDED(replay)) return S_OK;
     replayQuery = false;
   }
+  // The replay's answer: its words fill the placeholder now.
+  const bool fills = (flags & 0x1000) && replayed && cloudWords.load() > 0;
   HRESULT hr = pinyinChanged(self, flags);
   if (flags & 0x400) InterlockedExchange(&channel->diagnostics[29], hr);
+  if (fills && SUCCEEDED(hr) && CloudOn()) RecordDisplay();
   return hr;
 }
 HRESULT WINAPI DesktopRule(void* self, void* localSuggestions) {
   HRESULT nativeResult = desktopRule(self, localSuggestions);
-  if (!regenerating) { replayed = false; replayQuery = false; cloudWords = 0; }  // a keystroke
+  if (!regenerating) {  // a keystroke
+    replayed = false; replayQuery = false; cloudWords = 0; displayed = false;
+    keyTick = GetTickCount64(); requestTick = 0; arrivalTick = 0;
+  }
   if (FAILED(nativeResult)) return nativeResult;
-  if (!live.load() || !Enabled(channel)) return nativeResult;
+  if (!CloudOn()) return nativeResult;
   if (!cloudOptIn.load()) return nativeResult;
   auto* object = static_cast<BYTE*>(self);
   const auto& e = layout.engine;
@@ -318,7 +356,7 @@ HRESULT WINAPI DesktopRule(void* self, void* localSuggestions) {
   return S_OK;
 }
 HRESULT WINAPI PreloadingList(void* self, void** output) {
-  if (!live.load() || !Enabled(channel) || regenerating) return preload(self, output);
+  if (!CloudOn() || regenerating) return preload(self, output);
   if (!output) return E_INVALIDARG;
   *output = nullptr;
   // The original caller concatenates this list with its local suggestions.
@@ -345,7 +383,7 @@ HRESULT WINAPI OnChanged(void* self, DWORD flags) {
   // Validated against ChsEM 10.0.26100.9767 public PDB + disassembly:
   // bit 3 = spelling changed, bit 29 = request native cloud candidates.
   // Preserve the native generation checks, debounce, cancellation and UI.
-  if (live.load() && Enabled(channel) && (flags & (modern ? 0x10 : 8)) &&
+  if (CloudOn() && (flags & (modern ? 0x10 : 8)) &&
       (!modern || settingsRule(static_cast<BYTE*>(self) - layout.engine.cloudBase) == S_OK)) {
     flags |= modern ? 0x20000 : 0x20000000;
     InterlockedIncrement(&channel->triggers);
@@ -363,7 +401,7 @@ HRESULT WINAPI OnDesktopChanged(void* self, DWORD flags) {
 HRESULT WINAPI CandidateRule(void* self) {
   // The original setting rule includes cloud opt-in and sensitive input scopes.
   // Only bypass candidate-confidence/daily-quota heuristics for active queries.
-  if (live.load() && Enabled(channel)) return settingsRule(self);
+  if (CloudOn()) return settingsRule(self);
   return originalRule(self);
 }
 bool Bing(const wchar_t* host) {
@@ -372,7 +410,7 @@ bool Bing(const wchar_t* host) {
 }
 HINTERNET WINAPI Connect(HINTERNET session, LPCWSTR server, INTERNET_PORT port, DWORD reserved) {
   InterlockedIncrement(&channel->diagnostics[6]);
-  bool redirect = live.load() && Enabled(channel) && Bing(server);
+  bool redirect = CloudOn() && Bing(server);
   // Preserve the IME's own connection handle and original server. Restoring
   // hooks must not strand a cached connection on our stopped loopback service.
   HINTERNET result = WinHttpConnect(session, server, port, reserved);
@@ -387,7 +425,7 @@ HINTERNET WINAPI Open(HINTERNET connection, LPCWSTR verb, LPCWSTR object, LPCWST
   bool redirect = false;
   HINTERNET result = WinHttpOpenRequest(connection, verb, object, version, referrer, accept, flags);
   HINTERNET replacementConnection = nullptr;
-  if (result && live.load() && Enabled(channel)) {
+  if (result && CloudOn()) {
     // The IME may reuse a connection which predates DLL injection. Inspect the
     // newly opened request before any I/O, then recreate it on loopback.
     wchar_t url[4096]{}; DWORD bytes = sizeof(url);
@@ -416,6 +454,8 @@ HINTERNET WINAPI Open(HINTERNET connection, LPCWSTR verb, LPCWSTR object, LPCWST
     WINHTTP_PROXY_INFO direct{WINHTTP_ACCESS_TYPE_NO_PROXY, nullptr, nullptr};
     WinHttpSetOption(result, WINHTTP_OPTION_PROXY, &direct, sizeof(direct));
     InterlockedIncrement(&channel->requests);
+    ULONGLONG none = 0;
+    if (keyTick.load()) requestTick.compare_exchange_strong(none, GetTickCount64());
   }
   return result;
 }
@@ -441,10 +481,10 @@ BOOL WINAPI Close(HINTERNET handle) {
   return result;
 }
 
-// Typing statistics. SetPrevPrimitive receives each committed conversion and
-// its reading, as context for next-word prediction; it declines (S_FALSE)
-// where Microsoft Pinyin keeps no history, and so do we. Only counts leave
-// this function. Engine thread only.
+// Typing statistics and cloud choices. SetPrevPrimitive receives each
+// committed conversion and its reading, as context for next-word prediction;
+// it declines (S_FALSE) where Microsoft Pinyin keeps no history, and so do we.
+// Only counts and indices leave this function, never text. Engine thread only.
 using CommitText = HRESULT (WINAPI*)(void*, const NativeStringView*, const NativeStringView*);
 CommitText commitText = nullptr;
 ULONGLONG lastCommit = 0;
@@ -467,23 +507,31 @@ bool ReadCommitted(const NativeStringView* text, const NativeStringView* reading
     return true;
   } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
-void CountCommit(const Committed& c) {
+// Tells the core's adaptive ranking which cloud words the placeholder showed
+// for this spelling and which one was committed: only the answer's hash and
+// indices cross. Returns the committed word's index in the response, or -1.
+LONG ReportChoice(const Committed& c) {
+  Choice choice;
+  {
+    std::wstring_view word(c.text, c.length <= ARRAYSIZE(c.text) ? c.length : 0);
+    std::lock_guard lock(wordsMutex);
+    // Only a replayed placeholder displayed our words; cloudWords is how many.
+    choice = ChoiceFor(responseWords, localWords, replayed ? cloudWords.load() : 0, word);
+    responseWords.clear();  // answered this spelling; never match a later word
+  }
+  if (choice.shown) {
+    LONG written = InterlockedCompareExchange(&channel->choiceCount, 0, 0);
+    channel->choices[static_cast<ULONG>(written) % kChoices] = choice;
+    InterlockedExchange(&channel->choiceCount, written + 1);
+  }
+  return choice.picked;
+}
+void CountCommit(const Committed& c, bool cloud) {
   ULONGLONG now = GetTickCount64();
   ULONGLONG gap = lastCommit ? now - lastCommit : kTypingPause + 1;
   // After a break, count from the first keystroke of this word instead.
   if (gap > kTypingPause) gap = compositionStart && now - compositionStart <= kTypingPause ? now - compositionStart : 0;
   lastCommit = now; compositionStart = 0;
-  // A cloud word is one the placeholder actually showed for this spelling: from
-  // our response and not among the local candidates (those the native filter drops).
-  bool cloud = false;
-  {
-    std::wstring_view word(c.text, c.length <= ARRAYSIZE(c.text) ? c.length : 0);
-    std::lock_guard lock(wordsMutex);
-    cloud = replayed && !word.empty() &&
-        std::find(responseWords.begin(), responseWords.end(), word) != responseWords.end() &&
-        std::find(localWords.begin(), localWords.end(), word) == localWords.end();
-    responseWords.clear();  // answered this spelling; never match a later word
-  }
   InterlockedIncrement(&channel->statCommits);
   InterlockedExchangeAdd(&channel->statChars, c.chars);
   InterlockedExchangeAdd(&channel->statLetters, c.letters);
@@ -493,17 +541,25 @@ void CountCommit(const Committed& c) {
 HRESULT WINAPI CommitTextHook(void* self, const NativeStringView* text, const NativeStringView* reading) {
   HRESULT hr = commitText(self, text, reading);
   Committed c;
-  if (hr == S_OK && live.load() && Enabled(channel) && InterlockedCompareExchange(&channel->statsEnabled, 0, 0) &&
-      ReadCommitted(text, reading, c) && c.chars > 0)
-    CountCommit(c);
+  if (hr == S_OK && live.load() && Enabled(channel) && ReadCommitted(text, reading, c) && c.chars > 0) {
+    // Typed on before the cloud could answer: a faster answer might have shown a word.
+    if (keyTick.load() && requestTick.load() && !arrivalTick.load()) InterlockedIncrement(&channel->timedMissed);
+    bool cloud = ReportChoice(c) >= 0;
+    if (InterlockedCompareExchange(&channel->statsEnabled, 0, 0)) CountCommit(c, cloud);
+  }
   return hr;
 }
 
 // ChsProxyDS waits until typing has paused (polling every 10 ms) before it
 // sends a request. A replayed query repeats a spelling the user already
 // paused on: take the same single-request lock and send right away.
+LONG CloudDelay(const BYTE* handler) {
+  __try { return *reinterpret_cast<const LONG*>(handler + layout.proxy.cloudDelay); }
+  __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
+}
 int WINAPI SkipDebounce(void* self, void* input) {
-  if (!replayQuery.exchange(false) || !live.load() || !Enabled(channel)) return debounce(self, input);
+  if (layout.proxy.cloudDelay) InterlockedExchange(&channel->cloudDelay, CloudDelay(static_cast<const BYTE*>(self)));
+  if (!replayQuery.exchange(false) || !CloudOn()) return debounce(self, input);
   while (*requestLock) Sleep(10);
   *requestLock = 1;
   InterlockedIncrement(&channel->diagnostics[35]);
@@ -570,6 +626,7 @@ bool InstallTrigger(HMODULE module, bool isModern) {
     Hook(base, e.displayOrder, reinterpret_cast<void*>(CloudDisplayOrder), reinterpret_cast<void**>(&cloudDisplayOrder));
     // Typing statistics; the core enables counting.
     Hook(base, e.commitText, reinterpret_cast<void*>(CommitTextHook), reinterpret_cast<void**>(&commitText));
+    if (MH_ApplyQueued() != MH_OK) return false;
   }
   auto* head = Headers(module);
   auto* sections = IMAGE_FIRST_SECTION(head);
@@ -605,6 +662,7 @@ bool InstallNetwork(HMODULE module) {
       requestLock = base + p.requestLock;
       Hook(base, p.debounce, reinterpret_cast<void*>(SkipDebounce), reinterpret_cast<void**>(&debounce));
     }
+    if (MH_ApplyQueued() != MH_OK) return false;
   }
   auto dir = Headers(module)->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
   if (!dir.VirtualAddress) return false;
@@ -652,6 +710,11 @@ DWORD RunWorker() {
     if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Policies\\Microsoft\\InputMethod\\Settings\\Shared", L"Enable Cloud Candidate",
         RRF_RT_REG_DWORD, nullptr, &policy, &bytes) == ERROR_SUCCESS) cloud = policy;
     cloudOptIn = cloud != 0;
+    DWORD shuangpin = 0; bytes = sizeof(shuangpin);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\InputMethod\\Settings\\CHS", L"Enable Double Pinyin",
+        RRF_RT_REG_DWORD, nullptr, &shuangpin, &bytes);
+    doublePinyin = shuangpin != 0;
+    InterlockedExchange(&channel->doublePinyin, shuangpin != 0);
     HMODULE engine = GetModuleHandleW(L"InputService.dll");
     bool isModern = engine != nullptr;
     if (!engine) engine = GetModuleHandleW(L"ChsEM.dll");

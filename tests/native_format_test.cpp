@@ -92,6 +92,19 @@ int main() {
       reinterpret_cast<const NativeString*>(abbreviatedRecords.begin + 0x20)->Read() != L"原神启动" ||
       reinterpret_cast<const NativeString*>(abbreviatedRecords.begin + 0x60)->Read() != L"yuan shen qi dong") return 9;
   puts("PASS abbreviated input builds a native conversion record with the full reading");
+  // Several cloud words: one record each, in the order sent (the extension's answer hash relies on it).
+  NativeVector severalFields;
+  std::vector<pf::Candidate> several = {{"永远的神", 15, true, "yong'yuan'de'shen"}, {"永远滴神", 15, true, "yong'yuan'di'shen"},
+                                        {"永远都是", 16, true, "yong'yuan'dou'shi"}};
+  auto severalJson = pf::Utf8ToWide(pf::BuildNativeBingResponse("yyds", "yyds", several));
+  if (FAILED(parse(severalJson, severalFields))) return 10;
+  alignas(16) BYTE severalContext[0x300]{};
+  new (severalContext + 0x1a8) std::wstring(L"yyds");
+  NativeRecords severalRecords;
+  if (FAILED(add(severalContext, severalFields, severalRecords)) || severalRecords.end - severalRecords.begin != 3 * 0xf8) return 11;
+  for (size_t i = 0; i < several.size(); ++i)
+    if (reinterpret_cast<const NativeString*>(severalRecords.begin + i * 0xf8 + 0x20)->Read() != pf::Utf8ToWide(several[i].text)) return 12;
+  puts("PASS several cloud words build one native record each, in order");
   NativeVector result;
   auto json = pf::Utf8ToWide(pf::BuildBingResponse("juequling", {"绝区零", "测试云候选"}));
   HRESULT hr = parse(json, result);

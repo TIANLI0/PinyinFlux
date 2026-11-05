@@ -15,10 +15,10 @@ std::string Today() {
   return buffer;
 }
 
-// date,commits,chars,letters,cloud,activeSeconds
+// date,commits,chars,letters,cloud,activeSeconds,shown (files before 0.3 end at activeSeconds)
 std::string Line(const std::string& date, const TypingDay& d) {
   return date + ',' + std::to_string(d.commits) + ',' + std::to_string(d.chars) + ',' + std::to_string(d.letters) + ',' +
-         std::to_string(d.cloud) + ',' + std::to_string(d.activeMs / 1000);
+         std::to_string(d.cloud) + ',' + std::to_string(d.activeMs / 1000) + ',' + std::to_string(d.shown);
 }
 
 std::vector<std::string> ReadLines() {
@@ -38,6 +38,7 @@ TypingDay ReadDay(const std::string& date) {
     uint64_t seconds = 0;
     fields >> d.commits >> comma >> d.chars >> comma >> d.letters >> comma >> d.cloud >> comma >> seconds;
     d.activeMs = seconds * 1000;
+    if (fields >> comma >> d.shown; !fields) d.shown = 0;
   }
   return d;
 }
@@ -56,7 +57,7 @@ static void WriteDay(const std::string& date, const TypingDay& day) {
   std::wstring path = TypingStats::Path(), temp = path + L".tmp";
   {
     std::ofstream out(temp, std::ios::trunc);
-    out << "# date,commits,chars,letters,cloud,activeSeconds\n";
+    out << "# date,commits,chars,letters,cloud,activeSeconds,shown\n";
     for (const auto& l : lines) out << l << '\n';
     if (!out) return;
   }
@@ -66,7 +67,7 @@ static void WriteDay(const std::string& date, const TypingDay& day) {
 TypingStats::TypingStats() : date_(Today()), today_(ReadDay(date_)) {}
 
 void TypingStats::Add(const TypingDay& delta) {
-  if (!delta.commits && !delta.activeMs) return;
+  if (!delta.commits && !delta.activeMs && !delta.shown) return;
   std::string finishedDate;
   TypingDay finished;
   {
@@ -82,6 +83,7 @@ void TypingStats::Add(const TypingDay& delta) {
     today_.letters += delta.letters;
     today_.cloud += delta.cloud;
     today_.activeMs += delta.activeMs;
+    today_.shown += delta.shown;
     dirty_ = true;
   }
   if (!finishedDate.empty()) WriteDay(finishedDate, finished);
@@ -112,7 +114,8 @@ std::string TypingStats::Json() {
   std::lock_guard lock(mutex_);
   return ",\"typing\":{\"date\":\"" + date_ + "\",\"commits\":" + std::to_string(today_.commits) +
          ",\"chars\":" + std::to_string(today_.chars) + ",\"letters\":" + std::to_string(today_.letters) +
-         ",\"cloud\":" + std::to_string(today_.cloud) + ",\"activeSeconds\":" + std::to_string(today_.activeMs / 1000) + "}";
+         ",\"cloud\":" + std::to_string(today_.cloud) + ",\"activeSeconds\":" + std::to_string(today_.activeMs / 1000) +
+         ",\"shown\":" + std::to_string(today_.shown) + "}";
 }
 
 }  // namespace pf

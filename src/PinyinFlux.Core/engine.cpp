@@ -18,12 +18,8 @@ constexpr ULONGLONG kNegativeTtlMs = 2000;
 constexpr ULONGLONG kBackupGraceMs = 40;
 constexpr int kNativeBudgetMs = 450;
 // Microsoft Pinyin removes cloud words it already lists and shows the rest
-// from slot 2. Words after the best one must be confirmed (see RankCandidates).
+// from slot 2. How many of these are offered adapts (see RankCandidates).
 constexpr size_t kNativeWords = 3;
-
-bool Usable(const std::string& pinyin, const Candidate& c, bool nativeOnly) {
-  return c.fullMatch && (!nativeOnly || !NativeReading(pinyin, c).empty());
-}
 
 // Shared between the waiting request thread and the worker callbacks, which
 // may outlive the wait when a provider is slower than the timeout.
@@ -50,6 +46,7 @@ struct Fanout {
   std::string key, pinyin;
   bool nativeOnly = false;
   size_t limit = 0;
+  RankPolicy policy;
 };
 
 ULONGLONG TtlFor(const std::vector<Candidate>& words, bool complete) {
@@ -73,6 +70,7 @@ void CALLBACK RunJob(PTP_CALLBACK_INSTANCE, void* context) {
   Log("%s: %s -> %zu result(s) in %llums", job->provider->Name(), fanout.pinyin.c_str(), found.size(),
       GetTickCount64() - start);
 
+  Answers answers;
   std::vector<Candidate> merged;
   bool complete = false, publish = false;
   {
@@ -84,14 +82,16 @@ void CALLBACK RunJob(PTP_CALLBACK_INSTANCE, void* context) {
     --fanout.pending;
     if (fanout.pending == 0 && fanout.backfill) {
       complete = !fanout.failed;
-      merged = RankCandidates(fanout.results, fanout.ok, fanout.pinyin, fanout.nativeOnly, fanout.limit);
+      answers = {fanout.results, fanout.ok};
+      merged = RankCandidates(answers.results, answers.answered, fanout.pinyin, fanout.nativeOnly, fanout.limit,
+                              fanout.policy).words;
       // Never replace a usable partial answer with a failure.
       publish = !merged.empty() || complete;
     }
     SetEvent(fanout.event);
   }
   if (publish) {
-    fanout.cache->Put(fanout.key, merged, TtlFor(merged, complete));
+    fanout.cache->Put(fanout.key, answers, TtlFor(merged, complete));
     ++fanout.stats->backfills;
     Log("engine: %s backfilled %zu word(s)%s", fanout.pinyin.c_str(), merged.size(), complete ? "" : " (partial)");
   }
@@ -99,84 +99,7 @@ void CALLBACK RunJob(PTP_CALLBACK_INSTANCE, void* context) {
 
 }  // namespace
 
-std::vector<Candidate> RankCandidates(const std::vector<std::vector<Candidate>>& results, const std::vector<bool>& answered,
-                                      const std::string& pinyin, bool nativeOnly, size_t limit) {
-  // Sogou reports syllable IDs, so its abbreviated answers carry no full
-  // reading. Borrow one another source verified for the same word.
-  std::vector<const Candidate*> readable;
-  if (nativeOnly) {
-    for (const auto& list : results)
-      for (const auto& c : list)
-        if (Usable(pinyin, c, true)) readable.push_back(&c);
-  }
-  std::vector<std::vector<Candidate>> lists(results.size());
-  bool full = false;
-  for (size_t i = 0; i < results.size(); ++i) {
-    for (Candidate c : results[i]) {
-      if (nativeOnly && !Usable(pinyin, c, true)) {
-        auto donor = std::find_if(readable.begin(), readable.end(), [&](const Candidate* r) { return r->text == c.text; });
-        if (donor != readable.end()) c.reading = (*donor)->reading;
-      }
-      if (!Usable(pinyin, c, nativeOnly)) continue;
-      auto& list = lists[i];
-      if (std::any_of(list.begin(), list.end(), [&](const Candidate& item) { return item.text == c.text; })) continue;
-      full |= nativeOnly && MatchReading(pinyin, c) == ReadingMatch::Full;
-      list.push_back(std::move(c));
-    }
-  }
-  auto sources = [&](const std::string& text) {
-    return std::count_if(lists.begin(), lists.end(), [&](const auto& list) {
-      return std::any_of(list.begin(), list.end(), [&](const Candidate& c) { return c.text == text; });
-    });
-  };
-  // A confirmed word is answered by at least two sources, each ranking it among
-  // its first two: further down the lists are homophones (nihao -> 泥嚎).
-  auto confirmed = [&](const std::string& text) {
-    size_t agreeing = 0;
-    for (const auto& list : lists) {
-      auto it = std::find_if(list.begin(), list.end(), [&](const Candidate& c) { return c.text == text; });
-      if (it == list.end()) continue;
-      if (it - list.begin() > 1) return false;
-      ++agreeing;
-    }
-    return agreeing >= 2;
-  };
-  std::vector<Candidate> words;
-  auto add = [&](const Candidate& c) {
-    if (words.size() < limit && std::none_of(words.begin(), words.end(), [&](const Candidate& w) { return w.text == c.text; }))
-      words.push_back(c);
-  };
-  if (!full) {
-    // Abbreviations: the preferred source's guess is the most specific
-    // (yyds -> 永远的神); agreement favours generic phrases (永远都是), so they
-    // only follow it. Long initials are guesswork (dsjlfdslkfj ->
-    // 但是家里发大水了咖啡机): a word of five or more characters needs a second
-    // source (zhrmghg -> 中华人民共和国).
-    for (const auto& list : lists)
-      for (const auto& c : list) {
-        if (!nativeOnly) { add(c); continue; }
-        const std::string reading = NativeReading(pinyin, c);
-        size_t characters = static_cast<size_t>(std::count(reading.begin(), reading.end(), ' ')) + 1;
-        if (characters >= 5 && lists.size() >= 2 && sources(c.text) < 2) continue;
-        if (words.empty() || confirmed(c.text)) add(c);
-      }
-    return words;
-  }
-  // Full pinyin: the local dictionary already has the common word, and a
-  // source may answer with a homophone instead (zhongguoren -> 中果人). Offer
-  // only confirmed words, or the first answer of the only source with one
-  // once every other source has answered.
-  for (const auto& list : lists)
-    for (const auto& c : list)
-      if (confirmed(c.text)) add(c);
-  size_t answering = static_cast<size_t>(std::count_if(lists.begin(), lists.end(), [](const auto& list) { return !list.empty(); }));
-  if (words.empty() && answering == 1 && std::all_of(answered.begin(), answered.end(), [](bool b) { return b; }))
-    for (const auto& list : lists)
-      if (!list.empty()) add(list.front());
-  return words;
-}
-
-bool ResultCache::Get(const std::string& key, std::vector<Candidate>& out) {
+bool ResultCache::Get(const std::string& key, Answers& out) {
   std::lock_guard lock(mutex_);
   auto it = entries_.find(key);
   if (it == entries_.end()) return false;
@@ -186,32 +109,34 @@ bool ResultCache::Get(const std::string& key, std::vector<Candidate>& out) {
     return false;
   }
   lru_.splice(lru_.begin(), lru_, it->second.lru);
-  out = it->second.words;
+  out = it->second.answers;
   return true;
 }
 
-void ResultCache::Put(const std::string& key, const std::vector<Candidate>& words, ULONGLONG ttlMs) {
+void ResultCache::Put(const std::string& key, const Answers& answers, ULONGLONG ttlMs) {
   std::lock_guard lock(mutex_);
   ULONGLONG expires = GetTickCount64() + ttlMs;
   auto it = entries_.find(key);
   if (it != entries_.end()) {
-    it->second.words = words;
+    it->second.answers = answers;
     it->second.expiresAt = expires;
     lru_.splice(lru_.begin(), lru_, it->second.lru);
     return;
   }
   lru_.push_front(key);
-  entries_.emplace(key, Entry{words, expires, lru_.begin()});
+  entries_.emplace(key, Entry{answers, expires, lru_.begin()});
   if (entries_.size() > kCacheCapacity) {
     entries_.erase(lru_.back());
     lru_.pop_back();
   }
 }
 
-Engine::Engine(const Config& config)
-    : timeoutMs_(config.timeoutMs), maxCandidates_(static_cast<size_t>(config.maxCandidates)) {
+Engine::Engine(const Config& config, std::shared_ptr<RankModel> model)
+    : timeoutMs_(config.timeoutMs), maxCandidates_(static_cast<size_t>(config.maxCandidates)),
+      model_(model ? std::move(model) : std::make_shared<RankModel>()) {
   for (const auto& name : config.providers) {
     if (auto p = CreateProvider(name, config)) {
+      names_.emplace_back(p->Name());
       providers_.push_back(std::move(p));
     } else {
       Log("engine: unknown provider '%s' ignored", name.c_str());
@@ -220,14 +145,14 @@ Engine::Engine(const Config& config)
 }
 
 Engine::~Engine() = default;
-Engine::Engine(std::vector<std::shared_ptr<Provider>> providers, int timeoutMs, size_t maxCandidates)
-    : providers_(std::move(providers)), timeoutMs_(timeoutMs), maxCandidates_(maxCandidates) {}
-
-std::vector<std::string> Engine::ProviderNames() const {
-  std::vector<std::string> names;
-  for (const auto& p : providers_) names.emplace_back(p->Name());
-  return names;
+Engine::Engine(std::vector<std::shared_ptr<Provider>> providers, int timeoutMs, size_t maxCandidates,
+               std::shared_ptr<RankModel> model)
+    : providers_(std::move(providers)), timeoutMs_(timeoutMs), maxCandidates_(maxCandidates),
+      model_(model ? std::move(model) : std::make_shared<RankModel>()) {
+  for (const auto& p : providers_) names_.emplace_back(p->Name());
 }
+
+std::vector<std::string> Engine::ProviderNames() const { return names_; }
 
 std::string Engine::LastQuery() const {
   std::lock_guard lock(lastMutex_);
@@ -248,9 +173,18 @@ std::vector<Candidate> Engine::QueryCandidates(const std::string& pinyin, bool n
   }
 
   std::vector<Candidate> words;
+  const size_t limit = nativeOnly ? kNativeWords : maxCandidates_;
+  const RankPolicy policy = model_->Policy(names_);
+  auto rank = [&](const Answers& answers) {
+    Ranking ranking = RankCandidates(answers.results, answers.answered, pinyin, nativeOnly, limit, policy);
+    // Remembered so that the user's choice among these words is learned from.
+    if (nativeOnly) model_->Served(names_, ranking);
+    return std::move(ranking.words);
+  };
   const std::string cacheKey = (nativeOnly ? "native:" : "query:") + pinyin;
-  if (cache_->Get(cacheKey, words)) {
+  if (Answers cached; cache_->Get(cacheKey, cached)) {
     ++stats_->cacheHits;
+    words = rank(cached);
     if (!words.empty()) ++stats_->answered;
     return words;
   }
@@ -259,12 +193,12 @@ std::vector<Candidate> Engine::QueryCandidates(const std::string& pinyin, bool n
   ULONGLONG start = GetTickCount64();
   // Late network answers must not reshuffle a candidate list indefinitely.
   const int budget = nativeOnly ? std::min(timeoutMs_, kNativeBudgetMs) : timeoutMs_;
-  const size_t limit = nativeOnly ? kNativeWords : maxCandidates_;
   auto fanout = std::make_shared<Fanout>(providers_.size(), cache_, stats_);
   fanout->key = cacheKey;
   fanout->pinyin = pinyin;
   fanout->nativeOnly = nativeOnly;
   fanout->limit = limit;
+  fanout->policy = policy;
   fanout->pending = providers_.size();
   for (size_t i = 0; i < providers_.size(); ++i) {
     auto* job = new Job{fanout, providers_[i], i, budget};
@@ -306,12 +240,13 @@ std::vector<Candidate> Engine::QueryCandidates(const std::string& pinyin, bool n
   {
     std::lock_guard lock(fanout->mutex);
     complete = fanout->pending == 0 && !fanout->failed;
-    words = RankCandidates(fanout->results, fanout->ok, pinyin, nativeOnly, limit);
+    Answers answers{fanout->results, fanout->ok};
+    words = rank(answers);
     // Misses are cached only when every provider actually answered, so a
     // transient timeout does not suppress the word for the negative-cache
     // window. Written under the fanout lock: a straggler's backfill (RunJob)
     // must not be overwritten by this older partial answer.
-    if (!words.empty() || complete) cache_->Put(cacheKey, words, TtlFor(words, complete));
+    if (!words.empty() || complete) cache_->Put(cacheKey, answers, TtlFor(words, complete));
     fanout->backfill = fanout->pending != 0;
   }
 

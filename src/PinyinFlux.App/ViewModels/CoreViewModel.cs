@@ -100,15 +100,35 @@ public sealed partial class CoreViewModel : ObservableObject
     public bool NeedsElevation => Status is { NativeMode: true, NativeDenied: > 0 };
 
     /// <summary>Running but not working, and starting over may help (as opposed to granting rights).</summary>
-    public bool CanRetry => State == CoreState.Degraded && !NeedsElevation;
+    public bool CanRetry => State == CoreState.Degraded && !NeedsElevation && HeldBack is "" or "unsupported" or "crashed";
+
+    public string RetryLabel => CanRecheck ? "重新检查" : "重新启动";
 
     public bool IsNativeMode => Status?.NativeMode == true;
 
     public bool IsCompatibilityMode => Status is { NativeMode: false };
 
+    /// <summary>
+    /// The core's verdict on this Windows build when it holds back (see native_compat.h): after a Windows update it fetches
+    /// the new build's public symbols, tries the extension in a separate process and only then injects. Empty when injecting.
+    /// </summary>
+    private string HeldBack => Status is { NativeMode: true, NativeReady: 0, CompatState: { Length: > 0 } c } && c != "verified" ? c
+        : Status is { NativeMode: true, NativeReady: 0, NativeRestartPending: > 0 } ? "restartPending" : "";
+
+    /// <summary>Checking again can help after a failed check or crashes (a fixed Windows update, a retry by the user).</summary>
+    private bool CanRecheck => HeldBack is "unsupported" or "crashed";
+
     public string Title => State switch
     {
         CoreState.Running => IsNativeMode ? "正在工作" : "正在工作（兼容模式）",
+        CoreState.Degraded when HeldBack.Length > 0 => HeldBack switch
+        {
+            "restartPending" => "需要重启电脑",
+            "waitingSymbols" => "正在适配新的 Windows 版本",
+            "resolving" or "checking" => "正在检查兼容性",
+            "crashed" => "已暂停接入微软拼音",
+            _ => "暂不支持这个 Windows 版本",
+        },
         CoreState.Degraded => !IsNativeMode ? "系统代理被其他程序占用"
             : Status!.NativeUnsupported > 0 ? "暂不支持这个 Windows 版本"
             : Status.NativeDenied > 0 ? "需要管理员权限"
@@ -120,6 +140,16 @@ public sealed partial class CoreViewModel : ObservableObject
 
     public string Summary => State switch
     {
+        CoreState.Degraded when HeldBack.Length > 0 => HeldBack switch
+        {
+            "restartPending" => "Windows 已更新微软拼音，但输入法还在运行更新前的版本。重启电脑后会自动接入；在此之前输入法照常可用。",
+            "waitingSymbols" => "Windows 更新后，PinyinFlux 需要从微软下载一次与新版本对应的公开调试信息（约 10 MB）才能安全接入。联网后每分钟自动重试，无需操作；在此之前输入法照常可用。",
+            "resolving" or "checking" => "PinyinFlux 先在一个独立进程里试装，确认与本机微软拼音兼容后才接入输入法，通常只需几秒。",
+            "crashed" => "接入后微软拼音的进程意外退出了两次。为了不影响打字，PinyinFlux 已停止接入这个 Windows 版本，输入法照常可用。可以在“设置 → 更新”检查新版本，或点“重新检查”再试一次。",
+            _ => $"Windows {Status!.WindowsVersion} 改动了微软拼音的内部结构，PinyinFlux 检查后没有接入，以免影响输入法。输入法照常可用，只是暂时没有百度、搜狗云词。请在“设置 → 更新”检查新版本，适配后更新即可恢复；也可以在“设置 → 诊断”复制诊断信息反馈。",
+        },
+        CoreState.Running when Status is { NativeMode: true, NativeDoublePinyin: true } =>
+            "微软拼音正在使用双拼。双拼时发往云端的是按键而不是拼音，查出来的会是错词，所以双拼时 PinyinFlux 不补充云词，微软自带的云候选照常。改用全拼（含简拼）即可使用。",
         CoreState.Running => IsNativeMode
             ? "用微软拼音打字时，停顿片刻，本地没有的词会出现在候选栏第 2 位，带云朵图标。"
             : "微软拼音向 Bing 查询云候选时，PinyinFlux 会换成百度、搜狗的结果；查询时机由微软拼音决定。",
@@ -144,13 +174,16 @@ public sealed partial class CoreViewModel : ObservableObject
     public string ProxyState => Status is null ? "—" : Status.ProxyApplied ? "已指向 PinyinFlux（仅 Bing 的请求）" : "未指向 PinyinFlux";
     public string ImeSessions => Status?.NativeMode == true ? Format(Status.NativeReady) : Format(Status?.ImeSessions);
     public string NativeRequests => Format(Status?.NativeRequests);
+    /// <summary>Last keystroke to cloud word on screen: Microsoft's typing pause, the answer, the replay.</summary>
+    public string DisplayLatency => Status?.Timing is { Count: > 0 } t
+        ? $"{t.TotalMs} ms（停顿 {t.PauseMs} + 查询 {t.AnswerMs} + 显示 {t.ReplayMs}）" : "—";
 
     partial void OnStatusChanged(CoreStatus? value)
     {
         foreach (string name in new[] { nameof(CloudSwitchOffMessage), nameof(CanEnableCloudCandidates), nameof(CloudRequests), nameof(Answered), nameof(CacheHits), nameof(Latency), nameof(Memory),
                                         nameof(LastQuery), nameof(Version), nameof(CertState), nameof(ProxyState), nameof(ImeSessions),
-                                        nameof(NativeRequests), nameof(NeedsElevation), nameof(CanRetry), nameof(IsNativeMode),
-                                        nameof(IsCompatibilityMode), nameof(Title), nameof(Summary) })
+                                        nameof(NativeRequests), nameof(DisplayLatency), nameof(NeedsElevation), nameof(CanRetry), nameof(IsNativeMode),
+                                        nameof(IsCompatibilityMode), nameof(Title), nameof(Summary), nameof(RetryLabel) })
         {
             OnPropertyChanged(name);
         }
@@ -276,7 +309,10 @@ public sealed partial class CoreViewModel : ObservableObject
         IsBusy = true;
         try
         {
+            bool recheck = CanRecheck;
             await CoreClient.RunVerbAsync("--stop");
+            // Without its verdict the core checks this Windows build again before injecting.
+            if (recheck) CoreClient.ForgetCompatibility();
             Message = await StartCoreAsync();
             await Task.Delay(800);
             await RefreshAsync();

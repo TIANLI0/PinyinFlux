@@ -11,6 +11,7 @@
 #include "common.h"
 #include "cloud_query.h"
 #include "providers/provider.h"
+#include "ranking.h"
 
 namespace pf {
 
@@ -24,16 +25,23 @@ struct EngineStats {
   std::atomic<uint64_t> backfills{0}; // late provider answers merged into the cache
 };
 
+// Every provider's answer to one spelling (index = configured priority).
+// Cached unranked, so what the ranking model learns applies at once.
+struct Answers {
+  std::vector<std::vector<Candidate>> results;
+  std::vector<bool> answered;  // the provider responded
+};
+
 // LRU result cache. Shared with in-flight provider workers so answers that
 // arrive after the request deadline can still improve the next lookup.
 class ResultCache {
  public:
-  bool Get(const std::string& key, std::vector<Candidate>& out);
-  void Put(const std::string& key, const std::vector<Candidate>& words, ULONGLONG ttlMs);
+  bool Get(const std::string& key, Answers& out);
+  void Put(const std::string& key, const Answers& answers, ULONGLONG ttlMs);
 
  private:
   struct Entry {
-    std::vector<Candidate> words;
+    Answers answers;
     ULONGLONG expiresAt;
     std::list<std::string>::iterator lru;
   };
@@ -42,18 +50,14 @@ class ResultCache {
   std::list<std::string> lru_;
 };
 
-// Merges per-provider answers (index = configured priority; answered = the
-// provider responded). Native abbreviations keep priority order; native full
-// pinyin needs agreement between sources, see engine.cpp.
-std::vector<Candidate> RankCandidates(const std::vector<std::vector<Candidate>>& results, const std::vector<bool>& answered,
-                                      const std::string& pinyin, bool nativeOnly, size_t limit);
-
 // Fans a pinyin query out to the configured providers in parallel and merges
-// their full-match candidates (see RankCandidates).
+// their full-match candidates (see RankCandidates). Native answers are ranked
+// with what `model` learned; without one, the engine learns in memory.
 class Engine {
  public:
-  explicit Engine(const Config& config);
-  Engine(std::vector<std::shared_ptr<Provider>> providers, int timeoutMs, size_t maxCandidates);
+  explicit Engine(const Config& config, std::shared_ptr<RankModel> model = nullptr);
+  Engine(std::vector<std::shared_ptr<Provider>> providers, int timeoutMs, size_t maxCandidates,
+         std::shared_ptr<RankModel> model = nullptr);
   ~Engine();
 
   std::vector<std::string> Query(const std::string& pinyin);
@@ -65,10 +69,12 @@ class Engine {
 
  private:
   std::vector<std::shared_ptr<Provider>> providers_;
+  std::vector<std::string> names_;
   int timeoutMs_;
   size_t maxCandidates_;
 
   std::shared_ptr<ResultCache> cache_ = std::make_shared<ResultCache>();
+  std::shared_ptr<RankModel> model_;
 
   mutable std::mutex lastMutex_;
   std::string lastQuery_;

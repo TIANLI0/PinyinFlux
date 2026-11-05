@@ -37,7 +37,7 @@
                                     Visibility="{x:Bind ShowStart(ViewModel.State), Mode=OneWay}" />
                             <Button Content="授予权限" Style="{StaticResource AccentButtonStyle}" Command="{x:Bind ViewModel.RestartElevatedCommand}"
                                     Visibility="{x:Bind services:Ui.Visible(ViewModel.NeedsElevation), Mode=OneWay}" />
-                            <Button Content="重新启动" Command="{x:Bind ViewModel.RestartCommand}"
+                            <Button Content="{x:Bind ViewModel.RetryLabel, Mode=OneWay}" Command="{x:Bind ViewModel.RestartCommand}"
                                     Visibility="{x:Bind services:Ui.Visible(ViewModel.CanRetry), Mode=OneWay}" />
                             <Button Content="停止" Command="{x:Bind ViewModel.StopCommand}"
                                     Visibility="{x:Bind services:Ui.Visible(ViewModel.IsRunning), Mode=OneWay}" />
@@ -161,6 +161,9 @@
                         </controls:SettingRow>
                         <controls:SettingRow Header="转给 PinyinFlux 的云查询" Description="微软拼音原本发往 Bing 的云查询，改由百度、搜狗回答的次数。">
                             <TextBlock Text="{x:Bind ViewModel.NativeRequests, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        </controls:SettingRow>
+                        <controls:SettingRow Header="云词出现耗时" Description="从最后一次按键到云词出现在候选栏的平均时间。停顿是微软拼音等你停手的时间，查询是百度、搜狗的应答。">
+                            <TextBlock Text="{x:Bind ViewModel.DisplayLatency, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
                         </controls:SettingRow>
                     </StackPanel>
                     <StackPanel Spacing="12" Visibility="{x:Bind services:Ui.Visible(ViewModel.IsCompatibilityMode), Mode=OneWay}">

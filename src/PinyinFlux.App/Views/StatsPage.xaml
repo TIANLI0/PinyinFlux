@@ -55,6 +55,11 @@
                             <TextBlock Text="用了云词" Style="{StaticResource SecondaryTextStyle}" />
                             <TextBlock Text="{x:Bind ViewModel.Cloud, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
                         </StackPanel>
+                        <StackPanel Grid.Row="1" Grid.Column="2" Spacing="2"
+                                    ToolTipService.ToolTip="云词出现在候选栏后被选中的比例（选中次数/出现次数）。云词只在本地没有这个词时出现，每次输入最多计一次">
+                            <TextBlock Text="云词采纳率" Style="{StaticResource SecondaryTextStyle}" />
+                            <TextBlock Text="{x:Bind ViewModel.CloudRate, Mode=OneWay}" Style="{StaticResource StatValueStyle}" />
+                        </StackPanel>
                     </Grid>
                 </StackPanel>
             </Border>

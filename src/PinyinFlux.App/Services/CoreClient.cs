@@ -28,7 +28,19 @@ public sealed record CoreStatus(
     long NativeTriggers,
     long NativeRequests,
     bool TypingEnabled,
-    TypingDay? TypingToday);
+    TypingDay? TypingToday,
+    string CompatState,
+    string CompatDetail,
+    string WindowsVersion,
+    long NativeRestartPending,
+    bool NativeDoublePinyin,
+    DisplayTiming? Timing);
+
+/// <summary>How long a cloud word takes to appear after the last keystroke, averaged over the words displayed (ms).</summary>
+public sealed record DisplayTiming(long Count, long PauseMs, long AnswerMs, long ReplayMs, long Missed)
+{
+    public long TotalMs => PauseMs + AnswerMs + ReplayMs;
+}
 
 /// <summary>Talks to PinyinFluxCore.exe: its loopback status endpoint and its command-line verbs.</summary>
 public sealed class CoreClient : IDisposable
@@ -69,7 +81,9 @@ public sealed class CoreClient : IDisposable
                 Bool(r, "nativeMode"), Num(r, "nativeReady"), Num(r, "nativePending"),
                 Num(r, "nativeDenied"), Num(r, "nativeUnsupported"), Num(r, "nativeErrors"),
                 Num(r, "nativeLastError"), Num(r, "nativeTriggers"), Num(r, "nativeRequests"),
-                Bool(r, "typingEnabled"), Typing(r));
+                Bool(r, "typingEnabled"), Typing(r),
+                Str(Compat(r), "state"), Str(Compat(r), "detail"), Str(Compat(r), "windows"), Num(r, "nativeRestartPending"),
+                Bool(r, "nativeDoublePinyin"), Timing(r));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
         {
@@ -181,11 +195,32 @@ public sealed class CoreClient : IDisposable
         e.TryGetProperty("typing", out var t) && t.ValueKind == JsonValueKind.Object &&
         DateOnly.TryParseExact(Str(t, "date"), "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.None, out var date)
-            ? new TypingDay(date, Num(t, "commits"), Num(t, "chars"), Num(t, "letters"), Num(t, "cloud"), Num(t, "activeSeconds"))
+            ? new TypingDay(date, Num(t, "commits"), Num(t, "chars"), Num(t, "letters"), Num(t, "cloud"), Num(t, "activeSeconds"),
+                Num(t, "shown"))
             : null;
 
+    /// <summary>"nativeTiming": the extension's measurements of the cloud words it displayed.</summary>
+    private static DisplayTiming? Timing(JsonElement e) =>
+        e.TryGetProperty("nativeTiming", out var t) && t.ValueKind == JsonValueKind.Object
+            ? new DisplayTiming(Num(t, "count"), Num(t, "pauseMs"), Num(t, "answerMs"), Num(t, "replayMs"), Num(t, "missed"))
+            : null;
+
+    /// <summary>"nativeCompat": whether this Windows build may be injected (empty before 0.3 or in compatibility mode).</summary>
+    private static JsonElement Compat(JsonElement e) =>
+        e.TryGetProperty("nativeCompat", out var c) && c.ValueKind == JsonValueKind.Object ? c : default;
+
+    /// <summary>Forgets the core's compatibility verdicts (compat.ini), so its next start checks this Windows build again.</summary>
+    public static void ForgetCompatibility()
+    {
+        try
+        {
+            File.Delete(Path.Combine(CoreConfig.DataDir, "compat.ini"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
     private static string Str(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
 
     private static long Num(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;

@@ -2,8 +2,10 @@
 
 #include <dbghelp.h>
 
+#include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <vector>
 
 #include "common.h"
 #include "http_client.h"
@@ -12,6 +14,8 @@
 namespace pf {
 
 namespace {
+
+#pragma comment(lib, "version.lib")
 
 std::mutex dbghelpMutex;  // dbghelp is single-threaded
 
@@ -259,9 +263,41 @@ std::string Describe(const SymbolImage& image, bool complete) {
   return complete ? s : s + ", incomplete";
 }
 
+std::string FileVersion(const std::wstring& path) {
+  DWORD ignored = 0, size = GetFileVersionInfoSizeW(path.c_str(), &ignored);
+  std::vector<BYTE> data(size);
+  VS_FIXEDFILEINFO* info = nullptr;
+  UINT length = 0;
+  if (!size || !GetFileVersionInfoW(path.c_str(), 0, size, data.data()) ||
+      !VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &length) || !info) return {};
+  char text[48];
+  // The product version reads like Windows (10.0.26100.9843); file versions of these images start at 6.2.
+  std::snprintf(text, sizeof(text), "%u.%u.%u.%u", HIWORD(info->dwProductVersionMS), LOWORD(info->dwProductVersionMS),
+                HIWORD(info->dwProductVersionLS), LOWORD(info->dwProductVersionLS));
+  return text;
+}
+
 }  // namespace
 
-std::string ResolveNativeLayout(native::NativeLayout& layout) {
+native::ImageId ImageOnDisk(const std::wstring& path) {
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return {};
+  BYTE head[4096]{};
+  DWORD read = 0;
+  BOOL ok = ReadFile(file, head, sizeof(head), &read, nullptr);
+  CloseHandle(file);
+  auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(head);
+  if (!ok || read < sizeof(IMAGE_DOS_HEADER) || dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew < 0 ||
+      static_cast<DWORD>(dos->e_lfanew) + sizeof(IMAGE_NT_HEADERS64) > read) return {};
+  auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(head + dos->e_lfanew);
+  if (nt->Signature != IMAGE_NT_SIGNATURE || nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64) return {};
+  return {nt->FileHeader.TimeDateStamp, nt->OptionalHeader.SizeOfImage};
+}
+
+std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* report) {
+  LayoutReport ignored;
+  if (!report) report = &ignored;
+  *report = {};
   layout = {};
   wchar_t buffer[MAX_PATH]{};
   GetSystemDirectoryW(buffer, MAX_PATH);
@@ -291,6 +327,9 @@ std::string ResolveNativeLayout(native::NativeLayout& layout) {
     engine.Fill(e.commitText, "ChxIME::ProductItemPool::SetPrevPrimitive");
     complete = complete && e.listClass && e.listInterface && EngineFields(engine, e);
     if (!complete) e.pinyinChanged.rva = 0;  // the extension then reports Unsupported
+    report->usable = complete;
+    report->missingSymbols |= engine.Source().empty();
+    report->version = FileVersion(system + L"\\InputService.dll");
     summary += "InputService " + Describe(engine, complete);
     Log("native layout: InputService %08lx/%lx %s", e.image.stamp, e.image.size, Describe(engine, complete).c_str());
   }
@@ -313,8 +352,16 @@ std::string ResolveNativeLayout(native::NativeLayout& layout) {
             p.debounce.rva + i + 7 + Disp32(body.begin + i + 2) == lock)
           p.requestLock = lock;
       if (!p.requestLock) p.debounce = {};
+      // The wait it polls for: sub eax, esi; cmp eax, dword ptr [rdi + delay] (diagnostics).
+      for (size_t i = 0; p.requestLock && body.begin && i + 8 <= body.size && !p.cloudDelay; ++i) {
+        const BYTE* q = body.begin + i;
+        if (q[0] == 0x2b && (q[1] & 0xc0) == 0xc0 && q[2] == 0x3b && (q[3] & 0xc0) == 0x80 && (q[3] & 7) != 4 &&
+            Disp32(q + 4) > 0 && Disp32(q + 4) < 0x1000)
+          p.cloudDelay = static_cast<DWORD>(Disp32(q + 4));
+      }
     }
     bool complete = p.localCache.rva && p.addResponse.rva && p.debounce.rva;
+    report->missingSymbols |= proxy.Source().empty();
     summary += "; ChsProxyDS " + Describe(proxy, complete);
     Log("native layout: ChsProxyDS %08lx/%lx %s", p.image.stamp, p.image.size, Describe(proxy, complete).c_str());
   }
@@ -322,7 +369,12 @@ std::string ResolveNativeLayout(native::NativeLayout& layout) {
   SymbolImage legacy;
   if (legacy.Open(system + L"\\InputMethod\\CHS\\ChsEM.dll")) {
     layout.legacy.image = legacy.Id();
-    legacy.Fill(layout.legacy.cloudChanged, "ChxIME::CandidateHandlerConversionOfCloud::OnProductItemChanged");
+    // Hosts without InputService (older Windows) use this one.
+    if (legacy.Fill(layout.legacy.cloudChanged, "ChxIME::CandidateHandlerConversionOfCloud::OnProductItemChanged") &&
+        !layout.engine.image.stamp)
+      report->usable = true;
+    else if (!layout.engine.image.stamp)
+      report->missingSymbols |= legacy.Source().empty();
   }
   return summary;
 }

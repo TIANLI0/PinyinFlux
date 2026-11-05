@@ -31,13 +31,13 @@ public sealed partial class TypingViewModel : ObservableObject
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Chars), nameof(Time), nameof(Speed), nameof(Keys), nameof(Cloud))]
+    [NotifyPropertyChangedFor(nameof(Chars), nameof(Time), nameof(Speed), nameof(Keys), nameof(Cloud), nameof(CloudRate))]
     public partial TypingDay Today { get; set; } = TypingDay.Empty(DateOnly.FromDateTime(DateTime.Now));
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(TotalChars), nameof(TotalTime), nameof(TotalDays), nameof(DailyAverage), nameof(TotalSpeed),
                               nameof(TotalCloud), nameof(BestDay), nameof(BestDayDate))]
-    public partial TypingTotals Totals { get; set; } = new(0, 0, 0, 0, null);
+    public partial TypingTotals Totals { get; set; } = new(0, 0, 0, 0, null, 0, 0);
 
     /// <summary>The last 30 days, oldest first.</summary>
     public ObservableCollection<TypingBar> Chart { get; } = [];
@@ -58,13 +58,15 @@ public sealed partial class TypingViewModel : ObservableObject
     /// <summary>Pinyin letters per character: about 3 for full pinyin, lower with abbreviations and phrases.</summary>
     public string Keys => Today.Chars > 0 ? $"{(double)Today.Letters / Today.Chars:0.0} 键" : "—";
     public string Cloud => Number(Today.Cloud);
+    /// <summary>How often a displayed cloud word was taken: picks over displays.</summary>
+    public string CloudRate => Rate(Today.Cloud, Today.Shown) is { } rate ? $"{rate}（{Number(Today.Cloud)}/{Number(Today.Shown)}）" : "—";
 
     public string TotalChars => Number(Totals.Chars);
     public string TotalTime => Duration(Totals.ActiveSeconds);
     public string TotalDays => Totals.Days > 0 ? $"共 {Totals.Days} 天有记录" : "还没有记录";
     public string DailyAverage => Totals.Days > 0 ? $"{Number(Totals.Chars / Totals.Days)} 字" : "—";
     public string TotalSpeed => PerMinute(Totals.Chars, Totals.ActiveSeconds);
-    public string TotalCloud => Number(Totals.Cloud);
+    public string TotalCloud => Rate(Totals.CloudCounted, Totals.Shown) is { } rate ? $"{Number(Totals.Cloud)} 次 · 采纳 {rate}" : Number(Totals.Cloud);
     public string BestDay => Totals.Best is { } best ? $"{Number(best.Chars)} 字" : "—";
     public string BestDayDate => Totals.Best is { } best ? $"最多的一天（{best.Date:yyyy年M月d日}）" : "最多的一天";
 
@@ -89,8 +91,9 @@ public sealed partial class TypingViewModel : ObservableObject
 
         var days = _history.Values.Where(d => d.Date != today && d.Commits > 0).ToList();
         if (current.Commits > 0) days.Add(current);
+        // The rate only over days that recorded displays (0.3 and later).
         var totals = new TypingTotals(days.Sum(d => d.Chars), days.Sum(d => d.ActiveSeconds), days.Sum(d => d.Cloud), days.Count,
-            days.MaxBy(d => d.Chars));
+            days.MaxBy(d => d.Chars), days.Where(d => d.Shown > 0).Sum(d => d.Cloud), days.Sum(d => d.Shown));
         if (totals != Totals) Totals = totals;
 
         var range = Enumerable.Range(0, ChartDays).Select(i => today.AddDays(i - ChartDays + 1))
@@ -129,10 +132,12 @@ public sealed partial class TypingViewModel : ObservableObject
     };
 
     private static string PerMinute(long chars, long seconds) => seconds >= 30 ? $"{chars * 60.0 / seconds:0} 字/分" : "—";
+
+    private static string? Rate(long picked, long shown) => shown > 0 ? $"{Math.Min(100.0, 100.0 * picked / shown):0}%" : null;
 }
 
 /// <summary>All recorded days together; <see cref="Best"/> is the day with the most characters.</summary>
-public sealed record TypingTotals(long Chars, long ActiveSeconds, long Cloud, int Days, TypingDay? Best);
+public sealed record TypingTotals(long Chars, long ActiveSeconds, long Cloud, int Days, TypingDay? Best, long CloudCounted, long Shown);
 
 /// <summary>One day in the chart: bar height in pixels, tooltip, opacity (today stands out).</summary>
 public sealed record TypingBar(double Height, string Detail, double Opacity);

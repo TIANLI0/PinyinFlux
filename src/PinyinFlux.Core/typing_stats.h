@@ -10,6 +10,7 @@ namespace pf {
 // the settings UI reads the file for history.
 struct TypingDay {
   uint64_t commits = 0, chars = 0, letters = 0, cloud = 0, activeMs = 0;
+  uint64_t shown = 0;  // spellings for which a cloud word was displayed
 };
 
 class TypingStats {

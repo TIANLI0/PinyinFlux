@@ -33,8 +33,22 @@ class SymbolImage {
   std::string source_;  // "symbols", "built-in" or empty
 };
 
+struct LayoutReport {
+  // The candidate engine (InputService, or legacy ChsEM) resolved completely:
+  // the extension can work with this layout.
+  bool usable = false;
+  // An installed image has no public symbols here yet (the download failed,
+  // usually for want of a network right after a Windows update): retry later
+  // rather than giving up on this build.
+  bool missingSymbols = false;
+  std::string version;  // InputService.dll file version, e.g. "10.0.26100.9767"
+};
+
 // Resolves everything the extension needs for the installed images. Returns
 // a summary for the status page ("symbols", "built-in", or what is missing).
-std::string ResolveNativeLayout(native::NativeLayout& layout);
+std::string ResolveNativeLayout(native::NativeLayout& layout, LayoutReport* report = nullptr);
+
+// TimeDateStamp and SizeOfImage of an image file on disk (zero when unreadable).
+native::ImageId ImageOnDisk(const std::wstring& path);
 
 }  // namespace pf

@@ -10,6 +10,7 @@
 //   PinyinFluxCore.exe --stop     ask the running instance to exit
 //   PinyinFluxCore.exe --remove-task  delete the elevated start task (run elevated by --uninstall)
 //   PinyinFluxCore.exe --test <pinyin>  query the providers once
+//   PinyinFluxCore.exe --preflight <dll>  compatibility check in a disposable process (see native_compat.h)
 //   PinyinFluxCore.exe --dev      local test server; never touches system settings
 
 #include "common.h"
@@ -24,6 +25,7 @@
 #include "elevated_task.h"
 #include "engine.h"
 #include "log.h"
+#include "native_compat.h"
 #include "native_injector.h"
 #include "proxy_server.h"
 #include "sysproxy.h"
@@ -232,8 +234,11 @@ int Run(bool console, bool dev, int devPort = 18766) {
 
   ProxyServer server;
   NativeInjector injector;
-  server.SetEngine(std::make_shared<Engine>(*config));
-  server.SetStatusExtra([&server, &injector, cert] {
+  // Learned from the user's choices among cloud words; a dev instance keeps it in memory.
+  auto ranking = std::make_shared<RankModel>(dev ? std::wstring() : RankModel::DefaultPath());
+  injector.SetRankModel(ranking);
+  server.SetEngine(std::make_shared<Engine>(*config, ranking));
+  server.SetStatusExtra([&server, &injector, ranking, cert] {
     PROCESS_MEMORY_COUNTERS pmc{sizeof(pmc)};
     GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
     std::string s = ",\"proxyApplied\":";
@@ -241,7 +246,7 @@ int Run(bool console, bool dev, int devPort = 18766) {
     s += ",\"certTrusted\":";
     s += cert && IsCertificateTrusted(cert) ? "true" : "false";
     s += ",\"workingSetKB\":" + std::to_string(pmc.WorkingSetSize / 1024);
-    if (CurrentConfig()->nativeInjection) s += injector.StatusJson();
+    if (CurrentConfig()->nativeInjection) s += injector.StatusJson() + ranking->Json();
     return s;
   });
   if (!server.Start(config->port)) return kListenFailed;
@@ -295,7 +300,7 @@ int Run(bool console, bool dev, int devPort = 18766) {
       }
       SetCurrentConfig(next);
       LogSetFileEnabled(next->logToFile);
-      server.SetEngine(std::make_shared<Engine>(*next));
+      server.SetEngine(std::make_shared<Engine>(*next, ranking));
       if (next->port != server.Port()) {
         RestoreSystemProxy();
         server.Stop();
@@ -415,6 +420,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
   }
   if (cmd == L"--remove-task") return RemoveElevatedTask() ? kOk : kUsage;
   if (cmd == L"--test" && argc > 2) return RunTest(WideToUtf8(argv[2]));
+  // Run by the core itself before it injects into a Windows build for the first time.
+  if (cmd == L"--preflight" && argc > 2) return RunPreflight(argv[2]);
 
   Print("usage: PinyinFluxCore.exe [--console | --install | --uninstall | --stop | --test <pinyin>]\n");
   return kUsage;

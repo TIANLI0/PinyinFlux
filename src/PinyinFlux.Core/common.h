@@ -18,7 +18,7 @@
 namespace pf {
 
 inline constexpr wchar_t kAppName[] = L"PinyinFlux";
-inline constexpr char kVersion[] = "0.2.0";
+inline constexpr char kVersion[] = "0.3.0";
 
 // Named kernel objects shared with the settings UI.
 inline constexpr wchar_t kMutexName[] = L"Local\\PinyinFlux.Core";

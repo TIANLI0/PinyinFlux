@@ -22,6 +22,7 @@ add_executable(PinyinFluxCore WIN32
   src/PinyinFlux.Core/json.cpp
   src/PinyinFlux.Core/http_client.cpp
   src/PinyinFlux.Core/engine.cpp
+  src/PinyinFlux.Core/ranking.cpp
   src/PinyinFlux.Core/bing_format.cpp
   src/PinyinFlux.Core/cloud_query.cpp
   src/PinyinFlux.Core/providers/provider.cpp
@@ -33,6 +34,7 @@ add_executable(PinyinFluxCore WIN32
   src/PinyinFlux.Core/client_filter.cpp
   src/PinyinFlux.Core/proxy_server.cpp
   src/PinyinFlux.Core/native_injector.cpp
+  src/PinyinFlux.Core/native_compat.cpp
   src/PinyinFlux.Core/native_symbols.cpp
   src/PinyinFlux.Core/typing_stats.cpp
   src/PinyinFlux.Core/PinyinFluxCore.rc
@@ -61,7 +63,7 @@ add_dependencies(PinyinFluxCore PinyinFluxInject)
 include(CTest)
 if(BUILD_TESTING)
   add_executable(PinyinFluxCloudPolicyTest tests/cloud_policy_test.cpp
-    src/PinyinFlux.Core/engine.cpp src/PinyinFlux.Core/common.cpp src/PinyinFlux.Core/cloud_query.cpp
+    src/PinyinFlux.Core/engine.cpp src/PinyinFlux.Core/ranking.cpp src/PinyinFlux.Core/common.cpp src/PinyinFlux.Core/cloud_query.cpp
     src/PinyinFlux.Core/json.cpp src/PinyinFlux.Core/log.cpp src/PinyinFlux.Core/http_client.cpp
     src/PinyinFlux.Core/providers/provider.cpp src/PinyinFlux.Core/providers/baidu.cpp src/PinyinFlux.Core/providers/sogou.cpp)
   target_compile_definitions(PinyinFluxCloudPolicyTest PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -105,6 +107,12 @@ if(BUILD_TESTING)
   add_test(NAME native_cached_connection COMMAND PinyinFluxNativeTest $<TARGET_FILE:PinyinFluxInject> --cached)
   add_test(NAME legacy_native_cached_connection COMMAND PinyinFluxNativeTest $<TARGET_FILE:PinyinFluxInject> --legacy --cached)
   set_tests_properties(native_redirect_restore native_unknown_version legacy_native_redirect_restore legacy_native_unknown_version native_cached_connection legacy_native_cached_connection PROPERTIES TIMEOUT 15)
+  # The compatibility check the core runs before injecting into a Windows build.
+  add_test(NAME native_preflight COMMAND PinyinFluxCore --preflight $<TARGET_FILE:PinyinFluxInject>)
+  add_test(NAME native_preflight_rejects_bad_extension COMMAND PinyinFluxCore --preflight $<TARGET_FILE:PinyinFluxCloudPolicyTest>)
+  set_tests_properties(native_preflight native_preflight_rejects_bad_extension PROPERTIES TIMEOUT 30)
+  set_tests_properties(native_preflight PROPERTIES SKIP_RETURN_CODE 77 PASS_REGULAR_EXPRESSION "^PASS")
+  set_tests_properties(native_preflight_rejects_bad_extension PROPERTIES SKIP_RETURN_CODE 77 PASS_REGULAR_EXPRESSION "FAIL extension")
   # Tests on the real Microsoft Pinyin images exit 77 (skipped) where the
   # Chinese IME is not installed, such as Windows Server CI runners.
   set_tests_properties(native_layout_from_symbols native_no_empty_placeholder native_response_parser
