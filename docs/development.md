@@ -39,6 +39,7 @@ ctest --test-dir out/core/Release --output-on-failure
 | `native_response_parser` | 微软真实解析器接受 PinyinFlux 生成的全拼与简拼响应 |
 | `native_redirect_restore` 等 | 在隔离进程中加载真实组件：请求重定向、复用连接、停止恢复、核心重启、未知版本拒绝 |
 | `native_preflight` / `native_preflight_rejects_bad_extension` | 核心注入前的自检（`PinyinFluxCore.exe --preflight <扩展>`）在本机组件上通过，对无效扩展失败 |
+| `native_preflight_double_pinyin` | 进程的 HKCU 换成开着双拼的临时键，自检仍然通过 |
 
 依赖微软拼音组件的测试在未安装中文输入法的系统（如 Windows Server CI 镜像）上会报告跳过。程序级测试不能代替真实输入验收：
 

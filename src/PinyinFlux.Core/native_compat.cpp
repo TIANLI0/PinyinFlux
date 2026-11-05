@@ -115,6 +115,14 @@ int RunPreflight(const std::wstring& extension) {
   void* original = slot ? *slot : nullptr;
   if (!slot) return fail("load", "ChsProxyDS imports no WinHttpConnect");
 
+  // The check is about this Windows build, not the user's Microsoft Pinyin
+  // settings: with 双拼 on, the extension redirects nothing by design, and the
+  // redirect below would fail. Give this disposable process an empty HKCU.
+  HKEY blank = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\PinyinFlux\\Preflight", 0, nullptr, REG_OPTION_VOLATILE, KEY_READ | KEY_WRITE,
+                      nullptr, &blank, nullptr) == ERROR_SUCCESS)
+    RegOverridePredefKey(HKEY_CURRENT_USER, blank);
+
   // Install exactly as in the input host.
   HMODULE module = LoadLibraryW(extension.c_str());
   auto initialize = module ? reinterpret_cast<DWORD (WINAPI*)(void*)>(GetProcAddress(module, "PinyinFluxInitialize")) : nullptr;
@@ -225,9 +233,13 @@ std::string CompatKey(const native::NativeLayout& layout, const std::wstring& ex
   // The extension is cached under its SHA-256: ...\inject\<hash>\PinyinFluxInject.dll.
   std::wstring folder = extension.substr(0, extension.find_last_of(L"\\/"));
   std::string hash = WideToUtf8(folder.substr(folder.find_last_of(L"\\/") + 1)).substr(0, 16);
-  char text[160];
-  std::snprintf(text, sizeof(text), "is=%08lx/%lx;px=%08lx/%lx;em=%08lx/%lx;ext=%s", layout.engine.image.stamp, layout.engine.image.size,
-                layout.proxy.image.stamp, layout.proxy.image.size, layout.legacy.image.stamp, layout.legacy.image.size, hash.c_str());
+  // The revision of the check itself: a corrected check must not reuse old verdicts.
+  // 2: no longer fails while the user has 双拼 on (0.3.2).
+  constexpr int kCheckRevision = 2;
+  char text[176];
+  std::snprintf(text, sizeof(text), "is=%08lx/%lx;px=%08lx/%lx;em=%08lx/%lx;ext=%s;check=%d", layout.engine.image.stamp,
+                layout.engine.image.size, layout.proxy.image.stamp, layout.proxy.image.size, layout.legacy.image.stamp,
+                layout.legacy.image.size, hash.c_str(), kCheckRevision);
   return text;
 }
 

@@ -110,7 +110,16 @@ if(BUILD_TESTING)
   # The compatibility check the core runs before injecting into a Windows build.
   add_test(NAME native_preflight COMMAND PinyinFluxCore --preflight $<TARGET_FILE:PinyinFluxInject>)
   add_test(NAME native_preflight_rejects_bad_extension COMMAND PinyinFluxCore --preflight $<TARGET_FILE:PinyinFluxCloudPolicyTest>)
-  set_tests_properties(native_preflight native_preflight_rejects_bad_extension PROPERTIES TIMEOUT 30)
+  # The same check while the user has 双拼 on (the extension then redirects nothing itself).
+  add_executable(PinyinFluxPreflightTest tests/native_preflight_test.cpp src/PinyinFlux.Core/native_compat.cpp
+    src/PinyinFlux.Core/native_symbols.cpp src/PinyinFlux.Core/common.cpp src/PinyinFlux.Core/log.cpp src/PinyinFlux.Core/http_client.cpp)
+  target_compile_definitions(PinyinFluxPreflightTest PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+  target_compile_options(PinyinFluxPreflightTest PRIVATE /W4 /utf-8 /EHsc)
+  target_link_libraries(PinyinFluxPreflightTest PRIVATE ws2_32 winhttp dbghelp)
+  add_dependencies(PinyinFluxPreflightTest PinyinFluxInject)
+  add_test(NAME native_preflight_double_pinyin COMMAND PinyinFluxPreflightTest $<TARGET_FILE:PinyinFluxInject>)
+  set_tests_properties(native_preflight_double_pinyin PROPERTIES SKIP_RETURN_CODE 77 PASS_REGULAR_EXPRESSION "^PASS")
+  set_tests_properties(native_preflight native_preflight_rejects_bad_extension native_preflight_double_pinyin PROPERTIES TIMEOUT 30)
   set_tests_properties(native_preflight PROPERTIES SKIP_RETURN_CODE 77 PASS_REGULAR_EXPRESSION "^PASS")
   set_tests_properties(native_preflight_rejects_bad_extension PROPERTIES SKIP_RETURN_CODE 77 PASS_REGULAR_EXPRESSION "FAIL extension")
   # Tests on the real Microsoft Pinyin images exit 77 (skipped) where the
