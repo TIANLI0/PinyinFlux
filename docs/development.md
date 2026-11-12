@@ -9,12 +9,12 @@
 | `src/PinyinFlux.Inject/` | 注入输入法宿主的扩展 `PinyinFluxInject.dll`，及与核心共享内存的协议 |
 | `src/PinyinFlux.App/` | 设置界面 `PinyinFlux.exe`（WinUI 3，.NET 10） |
 | `tests/` | CTest 测试、联网冒烟测试、手工输入测试窗口 |
-| `installer/`、`build/` | Inno Setup 安装脚本与打包脚本 |
+| `installer/`、`build/` | 安装包定义（[FluentSetup](https://github.com/TIANLI0/FluentSetup) 的 `fluentsetup.json`）与打包脚本 |
 | `docs/` | 设计文档 |
 
 ## 构建
 
-需要 Visual Studio 2022 及以上（“使用 C++ 的桌面开发”，含 CMake 和 Ninja）以及 .NET 10 SDK。首次构建会从上游获取固定提交的 [MinHook](https://github.com/TsudaKageyu/minhook)。
+需要 Visual Studio 2022 及以上（“使用 C++ 的桌面开发”，含 CMake 和 Ninja）以及 .NET 10 SDK。首次构建会从上游获取固定提交的 [MinHook](https://github.com/TsudaKageyu/minhook)。打包安装程序还需要 [FluentSetup](https://github.com/TIANLI0/FluentSetup/releases) 的 `fluentsetup` 命令行（在 PATH 中，或用环境变量 `FLUENTSETUP` 指向 `fluentsetup.exe`）；CI 通过 `TIANLI0/FluentSetup` Action 获取。
 
 ```powershell
 .\build.ps1                       # 核心、扩展与测试，输出到 out\core\Release
@@ -110,7 +110,7 @@ Windows 11 22H2/23H2（22621/22631）的 InputService 以 XFG 编译：虚函数
 
 版本由 `CHANGELOG.md` 驱动，与 EncoDeck 相同：
 
-1. 修改 `Directory.Build.props` 中的 `VersionPrefix`，以及同样写着版本号的 `src/PinyinFlux.Core/common.h`（`kVersion`，`/status` 显示的版本）、`src/PinyinFlux.Core/PinyinFluxCore.rc`（核心的文件版本）和 `installer/PinyinFlux.iss` 的默认值。
+1. 修改 `Directory.Build.props` 中的 `VersionPrefix`，以及同样写着版本号的 `src/PinyinFlux.Core/common.h`（`kVersion`，`/status` 显示的版本）和 `src/PinyinFlux.Core/PinyinFluxCore.rc`（核心的文件版本）。安装包的版本由 `build\build-installer.ps1` 以 `-D Version=<版本>` 传给 FluentSetup，无需修改 `installer\fluentsetup.json`。
 2. 在 `CHANGELOG.md` 最上方加入 `## [0.2.0] - 2026-11-02 · 可选标题` 及更新内容（预发布写作 `0.2.0-beta.1`）。
 3. 推送到 main。CI 的 `version` 任务发现该版本还没有 Release，就会构建测试、打包，并以该段内容为说明发布 `v0.2.0`。版本号与 `VersionPrefix` 不一致时构建失败。
 

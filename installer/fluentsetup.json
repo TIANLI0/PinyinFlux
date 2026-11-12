@@ -1,0 +1,99 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TIANLI0/FluentSetup/v1.0.0/shared/schemas/fluentsetup.project.schema.json",
+  "schemaVersion": 1,
+  // PinyinFlux installer, built with FluentSetup (build\build-installer.ps1 passes -D Version=<version>).
+  //
+  // Installs the settings app (PinyinFlux.exe, WinUI 3, self-contained), the resident native core and the injection
+  // DLL for the current user (%LOCALAPPDATA%\Programs\PinyinFlux, no administrator rights).
+  //
+  // Upgrades, including from the Inno Setup installers up to 0.3.2:
+  //   * the Inno install ({7C1F4E52-...}_is1) is adopted in place, so the core's elevated scheduled task, which runs
+  //     only from the path it was created for, keeps working; its unins000.* files are removed;
+  //   * a running core is stopped with --stop (restores the proxy setting) before files are replaced;
+  //   * "enable" starts checked on a first install and follows the core's autostart entry (HKCU Run "PinyinFlux")
+  //     on an update, so --install runs again only if the core was enabled; scripted first installs never enable it.
+  // In-app update: PinyinFlux runs this setup with /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS
+  // /RELAUNCH=1 /LOG=... and exits; /SILENT shows the progress window, /RELAUNCH=1 starts "PinyinFlux.exe --updated".
+  // Uninstall: --uninstall restores the proxy settings, deletes the certificate and its key and removes autostart;
+  // settings and logs in %LOCALAPPDATA%\PinyinFlux are deleted only if the user agrees.
+  "variables": { "Version": "0.0.0-dev" },
+  "app": {
+    "id": "PinyinFlux",
+    "name": "PinyinFlux",
+    "publisher": "Tianli",
+    "version": "$(Version)",
+    "description": "给 Windows 自带的微软拼音接上百度、搜狗云词库",
+    "website": "https://github.com/TIANLI0/PinyinFlux",
+    "icon": "../src/PinyinFlux.App/Assets/PinyinFlux.ico",
+    "mainExecutable": "PinyinFlux.exe"
+  },
+  "files": {
+    "source": "../artifacts/PinyinFlux-win-x64",
+    "include": ["**/*"],
+    "exclude": ["**/*.pdb"]
+  },
+  "install": {
+    "scope": "user",
+    "userDir": "{LocalAppData}\\Programs\\{AppName}",
+    "allowCustomDir": true,
+    "desktopShortcut": "optionalOff",
+    "startMenuShortcut": "on",
+    "launchAfterInstall": "optionalOn",
+    "minWindowsBuild": 19041,
+    "closeCommand": { "run": "PinyinFluxCore.exe", "arguments": ["--stop"] },
+    "closeProcesses": ["PinyinFlux.exe", "PinyinFluxCore.exe"],
+    "legacyUninstallKeys": ["{7C1F4E52-3B8A-4D6E-9A21-5F0B8C3D2E91}_is1"],
+    "relaunchArguments": ["--updated"],
+    "cleanup": {
+      "removeFiles": ["unins*.exe", "unins*.dat", "unins*.msg"]
+    }
+  },
+  "options": [
+    {
+      "id": "enable",
+      "label": {
+        "zh-CN": "启用原生云候选实验模式（可能需要管理员权限）",
+        "en-US": "Enable experimental native cloud candidates (may require administrator privileges)"
+      },
+      "default": true,
+      "quietDefault": false,
+      "detect": { "runValue": "PinyinFlux" }
+    }
+  ],
+  "actions": [
+    {
+      "id": "enable",
+      "when": "afterInstall",
+      "run": "PinyinFluxCore.exe",
+      "arguments": ["--install"],
+      "ifOption": "enable",
+      "timeoutSeconds": 600,
+      "onFailure": "warn",
+      "name": { "zh-CN": "启用 PinyinFlux", "en-US": "Enable PinyinFlux" }
+    },
+    {
+      "id": "disable",
+      "when": "beforeUninstall",
+      "run": "PinyinFluxCore.exe",
+      "arguments": ["--uninstall"],
+      "timeoutSeconds": 120,
+      "onFailure": "warn",
+      "name": { "zh-CN": "还原代理设置并移除证书和自启动", "en-US": "Restore the proxy settings, remove the certificate and autostart" }
+    }
+  ],
+  "uninstall": {
+    "removeRunValues": ["PinyinFlux"],
+    "userData": { "paths": ["{LocalAppData}\\PinyinFlux"], "default": false }
+  },
+  "ui": {
+    "license": "../LICENSE",
+    "defaultLanguage": "auto"
+  },
+  "output": {
+    "directory": "../artifacts/installer",
+    "fileName": "PinyinFlux-Setup-{Version}-win-{Architecture}.exe",
+    "architecture": "x64",
+    "compression": "max",
+    "includeWinUI": true
+  }
+}

@@ -7,7 +7,8 @@
   1. Builds the native core (build.ps1, MSVC + CMake).
   2. Publishes the WinUI settings app self-contained for win-x64 into artifacts\PinyinFlux-win-x64;
      the core is copied in by the app project.
-  3. Downloads the Inno Setup compiler and builds the installer.
+  3. Builds the installer with FluentSetup (installer\fluentsetup.json). The fluentsetup CLI comes from
+     $env:FLUENTSETUP or PATH (https://github.com/TIANLI0/FluentSetup/releases; CI uses the TIANLI0/FluentSetup action).
 
 .EXAMPLE
   pwsh build\build-installer.ps1
@@ -50,19 +51,15 @@ foreach ($required in "PinyinFlux.exe", "PinyinFlux.pri", "PinyinFluxCore.exe", 
     if (-not (Test-Path (Join-Path $publish $required))) { throw "Publish output is missing $required." }
 }
 
-dotnet restore installer/InnoSetup.Tool.csproj --nologo -v q
-if ($LASTEXITCODE -ne 0) { throw "Could not download the Inno Setup compiler." }
-$innoVersion = [regex]::Match((Get-Content installer/InnoSetup.Tool.csproj -Raw), "<InnoSetupVersion>([^<]+)</InnoSetupVersion>").Groups[1].Value
-$nugetRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE ".nuget\packages" }
-$iscc = Join-Path $nugetRoot "tools.innosetup\$innoVersion\tools\ISCC.exe"
-if (-not (Test-Path $iscc)) { throw "ISCC.exe not found at $iscc" }
+$fluentsetup = if ($env:FLUENTSETUP) { $env:FLUENTSETUP } else { (Get-Command fluentsetup -ErrorAction SilentlyContinue).Source }
+if (-not $fluentsetup) { throw "fluentsetup not found. Install FluentSetup (https://github.com/TIANLI0/FluentSetup/releases) or set FLUENTSETUP to fluentsetup.exe." }
 
 $output = Join-Path $root "artifacts\installer"
 $setupPath = Join-Path $output "PinyinFlux-Setup-$Version-win-x64.exe"
 $setupRunning = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -eq $setupPath }
-if ($setupRunning) { throw "The previous installer is still running (PID $($setupRunning.Id -join ', ')). Close its wizard first; the build overwrites $setupPath." }
-& $iscc "/DAppVersion=$Version" "/DAppVersionNumeric=$numeric" "/DSourceDir=$publish" "/DOutputDir=$output" "/Qp" installer\PinyinFlux.iss
-if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+if ($setupRunning) { throw "The previous installer is still running (PID $($setupRunning.Id -join ', ')). Close it first; the build overwrites $setupPath." }
+& $fluentsetup build installer\fluentsetup.json -D "Version=$Version" -o $output
+if ($LASTEXITCODE -ne 0) { throw "Building the installer failed." }
 
 $setup = Get-ChildItem $output -Filter "PinyinFlux-Setup-$Version-win-x64.exe" | Select-Object -First 1
 $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash
