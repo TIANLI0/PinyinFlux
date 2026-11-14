@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/TIANLI0/FluentSetup/v1.0.0/shared/schemas/fluentsetup.project.schema.json",
+  "$schema": "https://raw.githubusercontent.com/TIANLI0/FluentSetup/v1.2.0/shared/schemas/fluentsetup.project.schema.json",
   "schemaVersion": 1,
   // PinyinFlux installer, built with FluentSetup (build\build-installer.ps1 passes -D Version=<version>).
   //
@@ -12,6 +12,9 @@
   //   * a running core is stopped with --stop (restores the proxy setting) before files are replaced;
   //   * "enable" starts checked on a first install and follows the core's autostart entry (HKCU Run "PinyinFlux")
   //     on an update, so --install runs again only if the core was enabled; scripted first installs never enable it.
+  //   * files in use: ctfmon.exe / ChsIME.exe load a hash-named copy of the injection DLL from
+  //     %LOCALAPPDATA%\PinyinFlux\inject, never the one in the install folder, so Restart Manager (on by default)
+  //     finds at most PinyinFlux's own processes; nothing waits for a reboot.
   // In-app update: PinyinFlux runs this setup with /SILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS
   // /RELAUNCH=1 /LOG=... and exits; /SILENT shows the progress window, /RELAUNCH=1 starts "PinyinFlux.exe --updated".
   // Uninstall: --uninstall restores the proxy settings, deletes the certificate and its key and removes autostart;
@@ -53,6 +56,7 @@
       "id": "enable",
       "label": {
         "zh-CN": "启用原生云候选实验模式（可能需要管理员权限）",
+        "zh-TW": "啟用原生雲端候選字實驗模式（可能需要系統管理員權限）",
         "en-US": "Enable experimental native cloud candidates (may require administrator privileges)"
       },
       "default": true,
@@ -69,7 +73,7 @@
       "ifOption": "enable",
       "timeoutSeconds": 600,
       "onFailure": "warn",
-      "name": { "zh-CN": "启用 PinyinFlux", "en-US": "Enable PinyinFlux" }
+      "name": { "zh-CN": "启用 PinyinFlux", "zh-TW": "啟用 PinyinFlux", "en-US": "Enable PinyinFlux" }
     },
     {
       "id": "disable",
@@ -78,13 +82,20 @@
       "arguments": ["--uninstall"],
       "timeoutSeconds": 120,
       "onFailure": "warn",
-      "name": { "zh-CN": "还原代理设置并移除证书和自启动", "en-US": "Restore the proxy settings, remove the certificate and autostart" }
+      "name": {
+        "zh-CN": "还原代理设置并移除证书和自启动",
+        "zh-TW": "還原 Proxy 設定並移除憑證和自動啟動",
+        "en-US": "Restore the proxy settings, remove the certificate and autostart"
+      }
     }
   ],
   "uninstall": {
     "removeRunValues": ["PinyinFlux"],
     "userData": { "paths": ["{LocalAppData}\\PinyinFlux"], "default": false }
   },
+  // Only for Repair (Apps & features > Modify): the in-app updater deletes the installer it ran once the new version
+  // starts, so a damaged install is reinstalled from the GitHub release of exactly the installed version.
+  "update": { "github": "TIANLI0/PinyinFlux" },
   "ui": {
     "license": "../LICENSE",
     "defaultLanguage": "auto"

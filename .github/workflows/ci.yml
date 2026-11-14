@@ -89,7 +89,7 @@ jobs:
           dotnet-version: 10.0.x
 
       # fluentsetup CLI + installer runtime (verified download of the pinned release), on PATH.
-      - uses: TIANLI0/FluentSetup@v1.0.1
+      - uses: TIANLI0/FluentSetup@v1.2.0
 
       # A pre-release (0.2.0-beta.1) keeps its suffix; any other build is <prefix>-ci.<run>.
       - name: Build installer (FluentSetup)
