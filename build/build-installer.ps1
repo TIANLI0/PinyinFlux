@@ -54,11 +54,21 @@ foreach ($required in "PinyinFlux.exe", "PinyinFlux.pri", "PinyinFluxCore.exe", 
 $fluentsetup = if ($env:FLUENTSETUP) { $env:FLUENTSETUP } else { (Get-Command fluentsetup -ErrorAction SilentlyContinue).Source }
 if (-not $fluentsetup) { throw "fluentsetup not found. Install FluentSetup (https://github.com/TIANLI0/FluentSetup/releases) or set FLUENTSETUP to fluentsetup.exe." }
 
+# Code signing, only when the TIANLI0/codesign action has signed in (release builds in CI; it sets CODESIGN_SIGN and
+# CODESIGN_THUMBPRINT): PinyinFlux's own binaries, most of all PinyinFluxInject.dll, which is loaded into ctfmon.exe /
+# ChsIME.exe. The .NET and Windows App SDK files are not ours. FluentSetup then signs the installer and uninstall.exe.
+$signArgs = @()
+if ($env:CODESIGN_SIGN) {
+    & $env:CODESIGN_SIGN -Root $publish -Path 'PinyinFlux.exe', 'PinyinFlux.dll', 'PinyinFluxCore.exe', 'PinyinFluxInject.dll' `
+        -Description 'PinyinFlux' -DescriptionUrl 'https://github.com/TIANLI0/PinyinFlux'
+    $signArgs = @('--sign', '-D', "CodesignThumbprint=$env:CODESIGN_THUMBPRINT")
+}
+
 $output = Join-Path $root "artifacts\installer"
 $setupPath = Join-Path $output "PinyinFlux-Setup-$Version-win-x64.exe"
 $setupRunning = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -eq $setupPath }
 if ($setupRunning) { throw "The previous installer is still running (PID $($setupRunning.Id -join ', ')). Close it first; the build overwrites $setupPath." }
-& $fluentsetup build installer\fluentsetup.json -D "Version=$Version" -o $output
+& $fluentsetup build installer\fluentsetup.json -D "Version=$Version" @signArgs -o $output
 if ($LASTEXITCODE -ne 0) { throw "Building the installer failed." }
 
 $setup = Get-ChildItem $output -Filter "PinyinFlux-Setup-$Version-win-x64.exe" | Select-Object -First 1

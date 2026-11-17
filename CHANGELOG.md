@@ -2,6 +2,13 @@
 
 版本号与 `Directory.Build.props` 中的 `VersionPrefix` 一致。推送到 main 后，最上方的版本若还没有对应的 Release，CI 会自动发布；最上方为 `## [Unreleased]` 时不发布。
 
+## [0.3.4] - 2026-11-18 · 数字签名与新版安装程序
+
+### 改进
+
+- 安装程序、卸载程序和 PinyinFlux 自己的程序文件（包括注入输入法进程的 `PinyinFluxInject.dll`）带有 Authenticode 数字签名和时间戳，Windows 不再显示“未知发布者”，也更不容易被安全软件误报。
+- 安装程序第一页和安装完成页提供 GitHub、“更新说明”和“帮助和支持”链接；许可条款改为在第一页直接确认，安装少一步。
+
 ## [0.3.3] - 2026-11-13 · 安装程序改用 FluentSetup
 
 ### 改进

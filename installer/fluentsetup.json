@@ -19,7 +19,9 @@
   // /RELAUNCH=1 /LOG=... and exits; /SILENT shows the progress window, /RELAUNCH=1 starts "PinyinFlux.exe --updated".
   // Uninstall: --uninstall restores the proxy settings, deletes the certificate and its key and removes autostart;
   // settings and logs in %LOCALAPPDATA%\PinyinFlux are deleted only if the user agrees.
-  "variables": { "Version": "0.0.0-dev" },
+  // Code signing: release builds (CI with the TIANLI0/codesign login) add --sign -D CodesignThumbprint=<Certum
+  // certificate>; FluentSetup then signs the installer and the uninstall.exe it installs. Local builds stay unsigned.
+  "variables": { "Version": "0.0.0-dev", "CodesignThumbprint": "" },
   "app": {
     "id": "PinyinFlux",
     "name": "PinyinFlux",
@@ -27,6 +29,8 @@
     "version": "$(Version)",
     "description": "给 Windows 自带的微软拼音接上百度、搜狗云词库",
     "website": "https://github.com/TIANLI0/PinyinFlux",
+    "supportUrl": "https://github.com/TIANLI0/PinyinFlux/issues",
+    "releaseNotesUrl": "https://github.com/TIANLI0/PinyinFlux/releases",
     "icon": "../src/PinyinFlux.App/Assets/PinyinFlux.ico",
     "mainExecutable": "PinyinFlux.exe"
   },
@@ -98,7 +102,14 @@
   "update": { "github": "TIANLI0/PinyinFlux" },
   "ui": {
     "license": "../LICENSE",
+    "licenseStyle": "inline",
     "defaultLanguage": "auto"
+  },
+  "signing": {
+    "enabled": false,
+    "provider": "signtool",
+    "certificateThumbprint": "$(CodesignThumbprint)",
+    "timestampUrl": "http://time.certum.pl"
   },
   "output": {
     "directory": "../artifacts/installer",

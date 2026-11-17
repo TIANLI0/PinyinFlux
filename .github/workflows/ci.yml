@@ -79,6 +79,9 @@ jobs:
   package:
     needs: [version, build-test]
     runs-on: windows-2025
+    # Release builds only: the "codesign" environment holds the Certum credentials (secrets CERTUM_EMAIL,
+    # CERTUM_OTPAUTH, variable CERTUM_THUMBPRINT) and admits only main and v* tags. Other builds use no environment.
+    environment: ${{ needs.version.outputs.release == 'true' && 'codesign' || '' }}
     env:
       RELEASE_VERSION: ${{ needs.version.outputs.release == 'true' && needs.version.outputs.version || '' }}
     steps:
@@ -91,6 +94,16 @@ jobs:
       # fluentsetup CLI + installer runtime (verified download of the pinned release), on PATH.
       - uses: TIANLI0/FluentSetup@latest
 
+      # Code signing (releases only): build-installer.ps1 signs PinyinFlux's own binaries and FluentSetup signs the
+      # installer and its uninstall.exe once this login has made the Certum certificate available.
+      - name: Code signing login (Certum)
+        if: env.RELEASE_VERSION != ''
+        uses: TIANLI0/codesign@v1
+        with:
+          email: ${{ secrets.CERTUM_EMAIL }}
+          otpauth: ${{ secrets.CERTUM_OTPAUTH }}
+          thumbprint: ${{ vars.CERTUM_THUMBPRINT }}
+
       # A pre-release (0.2.0-beta.1) keeps its suffix; any other build is <prefix>-ci.<run>.
       - name: Build installer (FluentSetup)
         shell: pwsh
@@ -100,6 +113,10 @@ jobs:
           ./build/build-installer.ps1 -Version $version
           Copy-Item README.md, CHANGELOG.md artifacts/PinyinFlux-win-x64/
           Compress-Archive artifacts/PinyinFlux-win-x64/* artifacts/PinyinFlux-win-x64.zip
+
+      - name: Code signing logout
+        if: always() && env.RELEASE_VERSION != ''
+        uses: TIANLI0/codesign/logout@v1
 
       - uses: actions/upload-artifact@v5
         with:
